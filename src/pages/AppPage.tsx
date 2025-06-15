@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import FlowManager from '@/components/FlowManager';
 
 const AppPage = () => {
   const [flowData, setFlowData] = useState({
@@ -56,9 +56,20 @@ const AppPage = () => {
           variant: "destructive"
         });
       } else {
+        // Call the Edge Function to confirm flow setup
+        const response = await supabase.functions.invoke('apps-script-proxy', {
+          body: {
+            action: 'set_flow'
+          }
+        });
+
+        if (response.error) {
+          console.error('Edge function error:', response.error);
+        }
+
         toast({
           title: "Flow Created Successfully!",
-          description: `${flowData.flowName} is now active and will process Gmail attachments.`,
+          description: `${flowData.flowName} is now active and ready to process Gmail attachments.`,
         });
 
         // Reset form
@@ -70,6 +81,9 @@ const AppPage = () => {
           autoRun: false,
           frequency: 'daily'
         });
+
+        // Refresh the page to show the new flow
+        window.location.reload();
       }
     } catch (error) {
       toast({
@@ -126,125 +140,131 @@ const AppPage = () => {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <div className="space-y-6">
-            <div className="max-w-2xl mx-auto">
-              <Card className="border-none shadow-xl bg-white/80 backdrop-blur-sm">
-                <CardHeader className="text-center">
-                  <CardTitle className="text-2xl flex items-center justify-center">
-                    <Zap className="w-6 h-6 mr-2 text-blue-600" />
-                    Create New Flow
-                  </CardTitle>
-                  <CardDescription>
-                    Set up an automated workflow to save Gmail attachments to Google Drive
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Flow Name */}
-                  <div className="space-y-2">
-                    <Label htmlFor="flowName">Flow Name *</Label>
-                    <Input
-                      id="flowName"
-                      placeholder="e.g., Invoice Attachments"
-                      value={flowData.flowName}
-                      onChange={(e) => updateFlowData('flowName', e.target.value)}
-                      className="border-gray-200 focus:border-blue-500"
-                    />
-                  </div>
+        <div className="space-y-8">
+          {/* Existing Flow Creation Form */}
+          <div className="max-w-2xl mx-auto">
+            <Card className="border-none shadow-xl bg-white/80 backdrop-blur-sm">
+              <CardHeader className="text-center">
+                <CardTitle className="text-2xl flex items-center justify-center">
+                  <Zap className="w-6 h-6 mr-2 text-blue-600" />
+                  Create New Flow
+                </CardTitle>
+                <CardDescription>
+                  Set up an automated workflow to save Gmail attachments to Google Drive
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Flow Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="flowName">Flow Name *</Label>
+                  <Input
+                    id="flowName"
+                    placeholder="e.g., Invoice Attachments"
+                    value={flowData.flowName}
+                    onChange={(e) => updateFlowData('flowName', e.target.value)}
+                    className="border-gray-200 focus:border-blue-500"
+                  />
+                </div>
 
-                  {/* Email Filter */}
-                  <div className="space-y-2">
-                    <Label htmlFor="emailFilter">Email Filter *</Label>
-                    <Textarea
-                      id="emailFilter"
-                      placeholder="e.g., from:invoices@company.com has:attachment"
-                      value={flowData.emailFilter}
-                      onChange={(e) => updateFlowData('emailFilter', e.target.value)}
-                      className="border-gray-200 focus:border-blue-500 resize-none"
-                      rows={3}
-                    />
+                {/* Email Filter */}
+                <div className="space-y-2">
+                  <Label htmlFor="emailFilter">Email Filter *</Label>
+                  <Textarea
+                    id="emailFilter"
+                    placeholder="e.g., from:invoices@company.com has:attachment"
+                    value={flowData.emailFilter}
+                    onChange={(e) => updateFlowData('emailFilter', e.target.value)}
+                    className="border-gray-200 focus:border-blue-500 resize-none"
+                    rows={3}
+                  />
+                  <p className="text-sm text-gray-500">
+                    Use Gmail search syntax to define which emails to process
+                  </p>
+                </div>
+
+                {/* Drive Folder */}
+                <div className="space-y-2">
+                  <Label htmlFor="driveFolder">Google Drive Folder *</Label>
+                  <Input
+                    id="driveFolder"
+                    placeholder="e.g., /Business/Invoices"
+                    value={flowData.driveFolder}
+                    onChange={(e) => updateFlowData('driveFolder', e.target.value)}
+                    className="border-gray-200 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* File Types */}
+                <div className="space-y-2">
+                  <Label>File Types to Process</Label>
+                  <Select onValueChange={(value) => updateFlowData('fileTypes', value === 'all' ? [] : [value])}>
+                    <SelectTrigger className="border-gray-200 focus:border-blue-500">
+                      <SelectValue placeholder="Select file types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All file types</SelectItem>
+                      <SelectItem value="pdf">PDF only</SelectItem>
+                      <SelectItem value="images">Images only</SelectItem>
+                      <SelectItem value="documents">Documents only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Auto Run Toggle */}
+                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                  <div className="space-y-1">
+                    <Label>Auto-run Flow</Label>
                     <p className="text-sm text-gray-500">
-                      Use Gmail search syntax to define which emails to process
+                      Automatically process new emails
                     </p>
                   </div>
+                  <Switch
+                    checked={flowData.autoRun}
+                    onCheckedChange={(checked) => updateFlowData('autoRun', checked)}
+                  />
+                </div>
 
-                  {/* Drive Folder */}
+                {/* Frequency */}
+                {flowData.autoRun && (
                   <div className="space-y-2">
-                    <Label htmlFor="driveFolder">Google Drive Folder *</Label>
-                    <Input
-                      id="driveFolder"
-                      placeholder="e.g., /Business/Invoices"
-                      value={flowData.driveFolder}
-                      onChange={(e) => updateFlowData('driveFolder', e.target.value)}
-                      className="border-gray-200 focus:border-blue-500"
-                    />
-                  </div>
-
-                  {/* File Types */}
-                  <div className="space-y-2">
-                    <Label>File Types to Process</Label>
-                    <Select onValueChange={(value) => updateFlowData('fileTypes', value === 'all' ? [] : [value])}>
+                    <Label>Run Frequency</Label>
+                    <Select 
+                      value={flowData.frequency}
+                      onValueChange={(value) => updateFlowData('frequency', value)}
+                    >
                       <SelectTrigger className="border-gray-200 focus:border-blue-500">
-                        <SelectValue placeholder="Select file types" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All file types</SelectItem>
-                        <SelectItem value="pdf">PDF only</SelectItem>
-                        <SelectItem value="images">Images only</SelectItem>
-                        <SelectItem value="documents">Documents only</SelectItem>
+                        <SelectItem value="hourly">Every hour</SelectItem>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+                )}
 
-                  {/* Auto Run Toggle */}
-                  <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                    <div className="space-y-1">
-                      <Label>Auto-run Flow</Label>
-                      <p className="text-sm text-gray-500">
-                        Automatically process new emails
-                      </p>
-                    </div>
-                    <Switch
-                      checked={flowData.autoRun}
-                      onCheckedChange={(checked) => updateFlowData('autoRun', checked)}
-                    />
-                  </div>
+                {/* Set Flow Button */}
+                <Button 
+                  onClick={handleSetFlow}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
+                  size="lg"
+                >
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  Set Flow
+                </Button>
 
-                  {/* Frequency */}
-                  {flowData.autoRun && (
-                    <div className="space-y-2">
-                      <Label>Run Frequency</Label>
-                      <Select 
-                        value={flowData.frequency}
-                        onValueChange={(value) => updateFlowData('frequency', value)}
-                      >
-                        <SelectTrigger className="border-gray-200 focus:border-blue-500">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hourly">Every hour</SelectItem>
-                          <SelectItem value="daily">Daily</SelectItem>
-                          <SelectItem value="weekly">Weekly</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                <p className="text-center text-sm text-gray-500">
+                  Your flow will be securely stored and executed using Google Apps Script
+                </p>
+              </CardContent>
+            </Card>
+          </div>
 
-                  {/* Set Flow Button */}
-                  <Button 
-                    onClick={handleSetFlow}
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
-                    size="lg"
-                  >
-                    <CheckCircle className="w-5 h-5 mr-2" />
-                    Set Flow
-                  </Button>
-
-                  <p className="text-center text-sm text-gray-500">
-                    Your flow will be securely stored and executed using Google Apps Script
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
+          {/* New Flow Manager Component */}
+          <div className="max-w-4xl mx-auto">
+            <FlowManager />
+          </div>
         </div>
       </main>
     </div>
