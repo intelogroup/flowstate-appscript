@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Check if user has Google authentication with valid tokens
   const isGoogleConnected = !!(
     session?.provider_token && 
-    session?.provider === 'google'
+    session?.user?.app_metadata?.provider === 'google'
   );
 
   const refreshSession = async () => {
@@ -54,7 +54,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state change:', event, session?.provider);
+        console.log('Auth state change:', event, session?.user?.app_metadata?.provider);
         
         setSession(session);
         setUser(session?.user ?? null);
@@ -62,7 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // If session exists but tokens might be expired, try to refresh
         if (session && event === 'SIGNED_IN') {
-          console.log('User signed in with provider:', session.provider);
+          console.log('User signed in with provider:', session.user?.app_metadata?.provider);
           console.log('Provider token available:', !!session.provider_token);
           
           // Store token info for debugging
@@ -80,13 +80,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('Initial session check:', session?.provider);
+      console.log('Initial session check:', session?.user?.app_metadata?.provider);
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
 
       // If we have a session but no provider token, try to refresh
-      if (session && !session.provider_token && session.provider === 'google') {
+      if (session && !session.provider_token && session.user?.app_metadata?.provider === 'google') {
         console.log('Session exists but no provider token, attempting refresh...');
         refreshSession();
       }
