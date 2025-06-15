@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Play, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Play, Clock, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { Link } from 'react-router-dom';
 
 interface UserFlow {
   id: string;
@@ -22,8 +24,9 @@ interface UserFlow {
 
 const FlowManager = () => {
   const [runningFlows, setRunningFlows] = useState<Set<string>>(new Set());
+  const [authError, setAuthError] = useState<string | null>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   // Fetch user's flows
   const { data: userFlows, isLoading, refetch } = useQuery({
@@ -41,18 +44,21 @@ const FlowManager = () => {
     enabled: !!user?.id,
   });
 
+  // Check if user has Google authentication
+  const hasGoogleAuth = session?.provider_token;
+
   const runFlow = async (flow: UserFlow) => {
+    setAuthError(null);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
-      const { data: session } = await supabase.auth.getSession();
-      
       if (!session?.session) {
-        toast({
-          title: "Authentication Required",
-          description: "Please sign in to run flows.",
-          variant: "destructive"
-        });
+        setAuthError("Please sign in to run flows.");
+        return;
+      }
+
+      if (!hasGoogleAuth) {
+        setAuthError("Google authentication is required. Please sign in with Google to access Gmail and Drive.");
         return;
       }
 
@@ -67,6 +73,18 @@ const FlowManager = () => {
 
       if (response.error) {
         console.error('Edge function error:', response.error);
+        
+        // Handle specific error types
+        if (response.error.message?.includes('401') || response.error.message?.includes('Unauthorized')) {
+          setAuthError("Authentication expired. Please sign in with Google again to refresh your permissions.");
+          return;
+        }
+        
+        if (response.error.message?.includes('Google OAuth token not found')) {
+          setAuthError("Google authentication is required. Please sign in with Google to access Gmail and Drive.");
+          return;
+        }
+
         toast({
           title: "Flow Execution Failed",
           description: response.error.message || "Failed to execute the flow",
@@ -140,22 +158,6 @@ const FlowManager = () => {
     );
   }
 
-  if (!userFlows || userFlows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Your Flows</CardTitle>
-          <CardDescription>No flows created yet</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-gray-500 text-center py-8">
-            Create your first flow using the form above to get started.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -163,68 +165,116 @@ const FlowManager = () => {
         <CardDescription>Manage and execute your Gmail to Drive flows</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {userFlows.map((flow) => (
-          <div key={flow.id} className="border rounded-lg p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-lg">{flow.flow_name}</h3>
-              <div className="flex items-center space-x-2">
-                {flow.auto_run && (
-                  <Badge variant="secondary" className="flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {flow.frequency}
-                  </Badge>
-                )}
-                <Button
-                  onClick={() => runFlow(flow)}
-                  disabled={runningFlows.has(flow.id)}
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {runningFlows.has(flow.id) ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                      Running...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 mr-2" />
-                      Run Flow
-                    </>
+        {/* Authentication Status */}
+        {!hasGoogleAuth && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>Google authentication required for Gmail and Drive access.</span>
+              <Link to="/auth">
+                <Button size="sm" variant="outline">
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Sign in with Google
+                </Button>
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Authentication Error */}
+        {authError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>{authError}</span>
+              <Link to="/auth">
+                <Button size="sm" variant="outline">
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Re-authenticate
+                </Button>
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Success Status */}
+        {hasGoogleAuth && !authError && (
+          <Alert>
+            <CheckCircle className="h-4 w-4" />
+            <AlertDescription>
+              ✓ Connected to Google - Gmail and Drive access enabled
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {!userFlows || userFlows.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">
+            Create your first flow using the form above to get started.
+          </p>
+        ) : (
+          userFlows.map((flow) => (
+            <div key={flow.id} className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-lg">{flow.flow_name}</h3>
+                <div className="flex items-center space-x-2">
+                  {flow.auto_run && (
+                    <Badge variant="secondary" className="flex items-center">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {flow.frequency}
+                    </Badge>
                   )}
-                </Button>
-                <Button
-                  onClick={() => deleteFlow(flow.id)}
-                  variant="outline"
-                  size="sm"
-                  className="text-red-600 hover:text-red-700"
-                >
-                  Delete
-                </Button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
-              <div>
-                <span className="font-medium">Email Filter:</span>
-                <p className="break-all">{flow.email_filter}</p>
-              </div>
-              <div>
-                <span className="font-medium">Drive Folder:</span>
-                <p className="break-all">{flow.drive_folder}</p>
-              </div>
-              {flow.file_types && flow.file_types.length > 0 && (
-                <div>
-                  <span className="font-medium">File Types:</span>
-                  <p>{flow.file_types.join(', ')}</p>
+                  <Button
+                    onClick={() => runFlow(flow)}
+                    disabled={runningFlows.has(flow.id) || !hasGoogleAuth}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {runningFlows.has(flow.id) ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                        Running...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-2" />
+                        Run Flow
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => deleteFlow(flow.id)}
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    Delete
+                  </Button>
                 </div>
-              )}
-              <div>
-                <span className="font-medium">Created:</span>
-                <p>{new Date(flow.created_at).toLocaleDateString()}</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
+                <div>
+                  <span className="font-medium">Email Filter:</span>
+                  <p className="break-all">{flow.email_filter}</p>
+                </div>
+                <div>
+                  <span className="font-medium">Drive Folder:</span>
+                  <p className="break-all">{flow.drive_folder}</p>
+                </div>
+                {flow.file_types && flow.file_types.length > 0 && (
+                  <div>
+                    <span className="font-medium">File Types:</span>
+                    <p>{flow.file_types.join(', ')}</p>
+                  </div>
+                )}
+                <div>
+                  <span className="font-medium">Created:</span>
+                  <p>{new Date(flow.created_at).toLocaleDateString()}</p>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </CardContent>
     </Card>
   );

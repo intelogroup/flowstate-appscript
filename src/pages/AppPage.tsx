@@ -13,6 +13,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import FlowManager from '@/components/FlowManager';
+import AuthStatus from '@/components/AuthStatus';
 
 const AppPage = () => {
   const [flowData, setFlowData] = useState({
@@ -126,6 +127,7 @@ const AppPage = () => {
                 <Globe className="w-3 h-3 mr-1" />
                 Beta
               </Badge>
+              <AuthStatus />
               <div className="flex items-center space-x-2 text-sm text-gray-600">
                 <User className="w-4 h-4" />
                 <span>{user?.email}</span>
