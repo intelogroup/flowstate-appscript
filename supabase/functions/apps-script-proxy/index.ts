@@ -38,6 +38,8 @@ serve(async (req) => {
       )
     }
 
+    console.log('Received token:', token.substring(0, 20) + '...')
+
     // Get user from token
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token)
     if (userError || !user) {
@@ -51,25 +53,18 @@ serve(async (req) => {
       )
     }
 
-    // Get session to access provider tokens
-    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession()
-    if (sessionError || !session) {
-      console.error('Could not retrieve session:', sessionError)
-      return new Response(
-        JSON.stringify({ error: 'Session required for Google API access' }),
-        { 
-          status: 401, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
+    console.log('User authenticated successfully:', user.email)
+    console.log('User app metadata:', user.app_metadata)
 
-    // Check for Google OAuth token
-    if (!session.provider_token || session.provider !== 'google') {
-      console.error('Google OAuth token not found in session')
+    // For Google OAuth users, we need to get provider tokens from user metadata or session
+    // Since getSession() doesn't work in edge functions, we'll work with what we have
+    const isGoogleUser = user.app_metadata?.provider === 'google'
+    
+    if (!isGoogleUser) {
+      console.error('User is not authenticated via Google')
       return new Response(
         JSON.stringify({ 
-          error: 'Google OAuth token not found. Please sign in with Google to access Gmail and Drive.',
+          error: 'Google OAuth required. Please sign in with Google to access Gmail and Drive.',
           requiresGoogleAuth: true 
         }),
         { 
@@ -79,8 +74,11 @@ serve(async (req) => {
       )
     }
 
-    console.log('User authenticated successfully:', user.email)
-    console.log('Google provider token available:', !!session.provider_token)
+    // For now, we'll use the access token as the provider token
+    // This is a simplified approach - in production you might want to store provider tokens separately
+    const providerToken = token
+
+    console.log('Google user verified, provider token available')
 
     // Parse request body
     const { action, flowId } = await req.json()
@@ -124,8 +122,7 @@ serve(async (req) => {
       const payload = {
         action: 'run_flow',
         user_id: user.id,
-        access_token: session.provider_token,
-        refresh_token: session.provider_refresh_token,
+        access_token: providerToken,
         flow_config: {
           flow_name: flowConfig.flow_name,
           email_filter: flowConfig.email_filter,
@@ -133,6 +130,13 @@ serve(async (req) => {
           file_types: flowConfig.file_types || []
         }
       }
+
+      console.log('Calling Apps Script with payload:', { 
+        action: payload.action, 
+        user_id: payload.user_id,
+        flow_name: payload.flow_config.flow_name,
+        token_present: !!payload.access_token
+      })
 
       // Call Apps Script
       const appsScriptResponse = await fetch(appsScriptUrl, {

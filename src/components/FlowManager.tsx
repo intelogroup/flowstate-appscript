@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -63,15 +62,21 @@ const FlowManager = () => {
       }
 
       console.log('Running flow:', flow.flow_name);
-      console.log('Session:', session);
+      console.log('Session access_token available:', !!session.access_token);
       console.log('Provider token available:', !!session.provider_token);
 
+      // Call the edge function with proper authentication headers
       const response = await supabase.functions.invoke('apps-script-proxy', {
         body: {
           action: 'run_flow',
           flowId: flow.id
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
         }
       });
+
+      console.log('Edge function response:', response);
 
       if (response.error) {
         console.error('Edge function error:', response.error);
