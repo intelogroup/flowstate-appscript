@@ -8,9 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Zap, Globe, Settings, CheckCircle } from 'lucide-react';
+import { Zap, Globe, Settings, CheckCircle, LogOut, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Link } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 
 const AppPage = () => {
   const [flowData, setFlowData] = useState({
@@ -22,8 +24,9 @@ const AppPage = () => {
     frequency: 'daily'
   });
   const { toast } = useToast();
+  const { user, signOut } = useAuth();
 
-  const handleSetFlow = () => {
+  const handleSetFlow = async () => {
     if (!flowData.flowName || !flowData.emailFilter || !flowData.driveFolder) {
       toast({
         title: "Missing Information",
@@ -33,10 +36,48 @@ const AppPage = () => {
       return;
     }
 
-    toast({
-      title: "Flow Created Successfully!",
-      description: `${flowData.flowName} is now active and will process Gmail attachments.`,
-    });
+    try {
+      const { error } = await supabase
+        .from('user_configurations')
+        .insert({
+          user_id: user?.id,
+          flow_name: flowData.flowName,
+          email_filter: flowData.emailFilter,
+          drive_folder: flowData.driveFolder,
+          file_types: flowData.fileTypes,
+          auto_run: flowData.autoRun,
+          frequency: flowData.frequency
+        });
+
+      if (error) {
+        toast({
+          title: "Error saving flow",
+          description: error.message,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Flow Created Successfully!",
+          description: `${flowData.flowName} is now active and will process Gmail attachments.`,
+        });
+
+        // Reset form
+        setFlowData({
+          flowName: '',
+          emailFilter: '',
+          driveFolder: '',
+          fileTypes: [],
+          autoRun: false,
+          frequency: 'daily'
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive"
+      });
+    }
 
     console.log('Flow Data:', flowData);
   };
@@ -46,6 +87,10 @@ const AppPage = () => {
       ...prev,
       [field]: value
     }));
+  };
+
+  const handleLogout = async () => {
+    await signOut();
   };
 
   return (
@@ -67,9 +112,13 @@ const AppPage = () => {
                 <Globe className="w-3 h-3 mr-1" />
                 Beta
               </Badge>
-              <Button variant="outline" size="sm">
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
+              <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <User className="w-4 h-4" />
+                <span>{user?.email}</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
               </Button>
             </div>
           </div>
@@ -201,5 +250,5 @@ const AppPage = () => {
     </div>
   );
 };
-export default AppPage;
 
+export default AppPage;

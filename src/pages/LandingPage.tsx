@@ -1,11 +1,23 @@
 
+import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Play, Zap, Shield, Globe, Mail, FolderOpen } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 const LandingPage = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect authenticated users to the app
+  useEffect(() => {
+    if (user) {
+      navigate('/app');
+    }
+  }, [user, navigate]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
@@ -26,7 +38,7 @@ const LandingPage = () => {
                 Beta
               </Badge>
               <Button asChild variant="outline" size="sm">
-                <Link to="/app">Sign In</Link>
+                <Link to="/auth">Sign In</Link>
               </Button>
             </div>
           </div>
@@ -49,7 +61,7 @@ const LandingPage = () => {
                 size="lg" 
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-8 py-3"
               >
-                <Link to="/app">
+                <Link to="/auth">
                   <Play className="w-5 h-5 mr-2" />
                   Get Started
                 </Link>
@@ -95,4 +107,3 @@ const LandingPage = () => {
 };
 
 export default LandingPage;
-
