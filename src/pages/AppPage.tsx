@@ -1,4 +1,5 @@
-import { useState } from 'react';
+
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -7,13 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Zap, Globe, Settings, CheckCircle, LogOut, User } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { Zap, Globe, CheckCircle, LogOut, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import FlowManager from '@/components/FlowManager';
 import AuthStatus from '@/components/AuthStatus';
+import { useFlowManagement } from '@/hooks/useFlowManagement';
 
 const AppPage = () => {
   const [flowData, setFlowData] = useState({
@@ -24,77 +24,30 @@ const AppPage = () => {
     autoRun: false,
     frequency: 'daily'
   });
-  const { toast } = useToast();
+  
   const { user, signOut } = useAuth();
+  const { createFlow } = useFlowManagement();
 
   const handleSetFlow = async () => {
     if (!flowData.flowName || !flowData.emailFilter || !flowData.driveFolder) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields before setting up your flow.",
-        variant: "destructive"
-      });
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('user_configurations')
-        .insert({
-          user_id: user?.id,
-          flow_name: flowData.flowName,
-          email_filter: flowData.emailFilter,
-          drive_folder: flowData.driveFolder,
-          file_types: flowData.fileTypes,
-          auto_run: flowData.autoRun,
-          frequency: flowData.frequency
-        });
-
-      if (error) {
-        toast({
-          title: "Error saving flow",
-          description: error.message,
-          variant: "destructive"
-        });
-      } else {
-        // Call the Edge Function to confirm flow setup
-        const response = await supabase.functions.invoke('apps-script-proxy', {
-          body: {
-            action: 'set_flow'
-          }
-        });
-
-        if (response.error) {
-          console.error('Edge function error:', response.error);
-        }
-
-        toast({
-          title: "Flow Created Successfully!",
-          description: `${flowData.flowName} is now active and ready to process Gmail attachments.`,
-        });
-
-        // Reset form
-        setFlowData({
-          flowName: '',
-          emailFilter: '',
-          driveFolder: '',
-          fileTypes: [],
-          autoRun: false,
-          frequency: 'daily'
-        });
-
-        // Refresh the page to show the new flow
-        window.location.reload();
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
+      await createFlow(flowData);
+      
+      // Reset form
+      setFlowData({
+        flowName: '',
+        emailFilter: '',
+        driveFolder: '',
+        fileTypes: [],
+        autoRun: false,
+        frequency: 'daily'
       });
+    } catch (error) {
+      console.error('Error creating flow:', error);
     }
-
-    console.log('Flow Data:', flowData);
   };
 
   const updateFlowData = (field: string, value: any) => {
@@ -143,7 +96,7 @@ const AppPage = () => {
 
       <main className="container mx-auto px-6 py-8">
         <div className="space-y-8">
-          {/* Existing Flow Creation Form */}
+          {/* Flow Creation Form */}
           <div className="max-w-2xl mx-auto">
             <Card className="border-none shadow-xl bg-white/80 backdrop-blur-sm">
               <CardHeader className="text-center">
@@ -251,6 +204,7 @@ const AppPage = () => {
                   onClick={handleSetFlow}
                   className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
                   size="lg"
+                  disabled={!flowData.flowName || !flowData.emailFilter || !flowData.driveFolder}
                 >
                   <CheckCircle className="w-5 h-5 mr-2" />
                   Set Flow
@@ -263,7 +217,7 @@ const AppPage = () => {
             </Card>
           </div>
 
-          {/* New Flow Manager Component */}
+          {/* Flow Manager Component */}
           <div className="max-w-4xl mx-auto">
             <FlowManager />
           </div>
