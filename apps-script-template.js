@@ -1,6 +1,7 @@
 
 /**
  * Apps Script Web App Template for Gmail to Drive Flow
+ * Updated for Body-Based Authentication (Compatible with Apps Script limitations)
  * 
  * Instructions:
  * 1. Create a new Google Apps Script project
@@ -14,9 +15,34 @@ function doPost(e) {
   try {
     // Parse the request body
     const requestData = JSON.parse(e.postData.contents);
-    const { action, userConfig, googleTokens } = requestData;
+    const { auth_token, action, userConfig, googleTokens } = requestData;
     
-    console.log('Received request:', { action, userConfig: userConfig.flowName });
+    console.log('Received request:', { 
+      action, 
+      userConfig: userConfig?.flowName,
+      hasAuthToken: !!auth_token,
+      authMethod: 'body-based'
+    });
+    
+    // Validate authentication token from request body
+    if (auth_token) {
+      // You can set your expected token here or validate against a stored value
+      const expectedToken = 'your-secret-token-here'; // Replace with your actual secret
+      
+      if (auth_token !== expectedToken) {
+        console.error('Authentication failed: Invalid auth token');
+        return ContentService
+          .createTextOutput(JSON.stringify({ 
+            error: 'Authentication failed', 
+            details: 'Invalid auth token provided in request body'
+          }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      
+      console.log('Authentication successful via request body');
+    } else {
+      console.log('No auth token provided - proceeding without authentication');
+    }
     
     if (action === 'process_gmail_flow') {
       return processGmailFlow(userConfig, googleTokens);
@@ -31,7 +57,8 @@ function doPost(e) {
     return ContentService
       .createTextOutput(JSON.stringify({ 
         error: 'Internal server error', 
-        details: error.toString() 
+        details: error.toString(),
+        note: 'Check Apps Script execution transcript for details'
       }))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -43,6 +70,10 @@ function processGmailFlow(userConfig, googleTokens) {
     
     // Set up OAuth2 access
     const accessToken = googleTokens.access_token;
+    
+    if (!accessToken) {
+      throw new Error('No access token provided for Gmail/Drive access');
+    }
     
     // Search for emails using the user's filter
     const threads = GmailApp.search(userConfig.emailFilter, 0, 50);
@@ -85,7 +116,8 @@ function processGmailFlow(userConfig, googleTokens) {
       message: `Processed ${processedCount} emails and saved ${attachmentCount} attachments`,
       processedEmails: processedCount,
       savedAttachments: attachmentCount,
-      flowName: userConfig.flowName
+      flowName: userConfig.flowName,
+      authMethod: 'body-based'
     };
     
     console.log('Flow completed:', result);
@@ -99,7 +131,8 @@ function processGmailFlow(userConfig, googleTokens) {
     return ContentService
       .createTextOutput(JSON.stringify({ 
         error: 'Failed to process Gmail flow', 
-        details: error.toString() 
+        details: error.toString(),
+        troubleshooting: 'Check Gmail and Drive API permissions, and verify access token is valid'
       }))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -148,6 +181,18 @@ function getOrCreateFolder(folderPath) {
 
 // Test function - you can run this to test your setup
 function testFunction() {
-  console.log('Apps Script is working correctly!');
+  console.log('Apps Script is working correctly with body-based authentication!');
   return 'Success';
 }
+
+/**
+ * SETUP INSTRUCTIONS FOR BODY-BASED AUTHENTICATION:
+ * 
+ * 1. Replace 'your-secret-token-here' with your actual secret token from Supabase
+ * 2. Deploy this script as a Web App with:
+ *    - Execute as: "User accessing the web app"
+ *    - Who has access: "Anyone"
+ * 3. Copy the Web App URL to your Supabase APPS_SCRIPT_WEB_APP_URL secret
+ * 4. The auth_token will be sent in the request body, which Apps Script can access
+ * 5. This method is compatible with Apps Script limitations on header access
+ */

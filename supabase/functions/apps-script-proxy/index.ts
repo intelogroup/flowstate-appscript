@@ -283,7 +283,8 @@ serve(async (req) => {
     logWithTimestamp('INFO', `Apps Script configuration [${requestId}]:`, {
       url_present: !!appsScriptUrl,
       secret_present: !!appsScriptSecret,
-      url_preview: appsScriptUrl ? appsScriptUrl.substring(0, 50) + '...' : 'NOT SET'
+      url_preview: appsScriptUrl ? appsScriptUrl.substring(0, 50) + '...' : 'NOT SET',
+      auth_method: 'body-based (Apps Script compatible)'
     });
     
     if (!appsScriptUrl) {
@@ -361,8 +362,10 @@ serve(async (req) => {
         email_filter: flowConfig.email_filter
       });
 
-      // Prepare payload for Apps Script with enhanced format
+      // Prepare payload for Apps Script with body-based authentication
       const payload = {
+        // NEW: Include auth_token in request body for Apps Script compatibility
+        auth_token: appsScriptSecret || null,
         action: 'process_gmail_flow',
         userConfig: {
           flowName: flowConfig.flow_name,
@@ -380,7 +383,8 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '7.0-with-secret-auth',
+          edge_function_version: '8.0-body-auth-compatible',
+          auth_method: 'body-based',
           flow_id: flowConfig.id,
           original_debug_info: requestBody.debug_info || {}
         }
@@ -390,29 +394,25 @@ serve(async (req) => {
         action: payload.action,
         flow_name: payload.userConfig.flowName,
         payload_size: JSON.stringify(payload).length,
-        has_google_tokens: !!payload.googleTokens.access_token
+        has_google_tokens: !!payload.googleTokens.access_token,
+        has_auth_token: !!payload.auth_token,
+        auth_method: 'body-based'
       });
 
-      // Prepare headers for Apps Script call
+      // Prepare headers for Apps Script call (no Authorization header needed)
       const appsScriptHeaders = {
         'Content-Type': 'application/json',
         'X-Request-ID': requestId,
         'X-User-ID': user.id,
         'X-Flow-ID': flowId,
-        'User-Agent': 'FlowState-EdgeFunction/7.0'
+        'User-Agent': 'FlowState-EdgeFunction/8.0-BodyAuth'
       };
 
-      // Add secret token to Authorization header if available
-      if (appsScriptSecret) {
-        appsScriptHeaders['Authorization'] = `Bearer ${appsScriptSecret}`;
-        logWithTimestamp('INFO', `Added secret token to Authorization header [${requestId}]`);
-      } else {
-        logWithTimestamp('WARN', `No Apps Script secret configured - proceeding without Authorization header [${requestId}]`);
-      }
+      logWithTimestamp('INFO', `Using body-based authentication for Apps Script compatibility [${requestId}]`);
 
-      // Call Apps Script with enhanced error handling and debugging
+      // Call Apps Script with body-based authentication
       try {
-        logWithTimestamp('INFO', `Calling Apps Script API [${requestId}]`);
+        logWithTimestamp('INFO', `Calling Apps Script API with body-based auth [${requestId}]`);
         logWithTimestamp('INFO', `Apps Script URL: ${appsScriptUrl} [${requestId}]`);
         
         const appsScriptResponse = await fetch(appsScriptUrl, {
@@ -437,18 +437,19 @@ serve(async (req) => {
             full_url: appsScriptUrl
           });
 
-          // Enhanced error analysis for common issues
+          // Enhanced error analysis for body-based authentication
           let troubleshootingMessage = 'Apps Script execution failed';
           let troubleshootingSteps = [];
 
           if (appsScriptResponse.status === 401) {
-            troubleshootingMessage = 'Apps Script authentication failed - check secret token or deployment configuration';
+            troubleshootingMessage = 'Apps Script authentication failed - check body-based auth token validation';
             troubleshootingSteps = [
               '1. Verify the APPS_SCRIPT_SECRET is correctly set in Supabase',
-              '2. Ensure your Apps Script accepts the Bearer token in Authorization header',
-              '3. Check Apps Script deployment permissions',
-              '4. Set "Execute as" to "User accessing the web app"',
-              '5. Set "Who has access" to "Anyone"'
+              '2. Ensure your Apps Script reads auth_token from request body JSON',
+              '3. Update Apps Script to use: const data = JSON.parse(e.postData.contents); const authToken = data.auth_token;',
+              '4. Check Apps Script deployment permissions',
+              '5. Set "Execute as" to "User accessing the web app"',
+              '6. Set "Who has access" to "Anyone"'
             ];
           } else if (appsScriptResponse.status === 404) {
             troubleshootingMessage = 'Apps Script URL not found - check deployment URL';
@@ -476,6 +477,7 @@ serve(async (req) => {
                 steps: troubleshootingSteps,
                 apps_script_url: appsScriptUrl,
                 error_details: errorText.substring(0, 200),
+                auth_method: 'body-based',
                 has_secret_configured: !!appsScriptSecret
               }
             }),
@@ -502,7 +504,8 @@ serve(async (req) => {
               apps_script_url: appsScriptUrl,
               payload_sent: payload.action,
               flow_name: payload.userConfig.flowName,
-              used_secret_auth: !!appsScriptSecret
+              auth_method: 'body-based',
+              has_secret_configured: !!appsScriptSecret
             }
           }),
           { 
@@ -531,9 +534,11 @@ serve(async (req) => {
                 '1. Check that your Apps Script URL is correct',
                 '2. Verify your Apps Script is deployed and accessible',
                 '3. Test the Apps Script URL directly in a browser',
-                '4. Check Apps Script execution transcript for errors'
+                '4. Check Apps Script execution transcript for errors',
+                '5. Ensure your Apps Script handles body-based authentication'
               ],
-              apps_script_url: appsScriptUrl
+              apps_script_url: appsScriptUrl,
+              auth_method: 'body-based'
             }
           }),
           { 
