@@ -66,9 +66,9 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Payload preparation with enhanced validation
-      addDebugInfo("📋 Step 4: Payload preparation");
-      const basePayload = {
+      // Step 4: Enhanced payload preparation
+      addDebugInfo("📋 Step 4: Enhanced payload preparation");
+      const requestPayload = {
         action: 'run_flow',
         flowId: flow.id,
         access_token: authToken,
@@ -83,17 +83,17 @@ export const useFlowOperations = (
           has_provider_token: !!session.provider_token,
           session_expires: session.expires_at,
           attempt_number: 1,
-          client_version: '2.0-enhanced'
+          client_version: '3.0-fixed-payload'
         }
       };
 
       // Validate payload before sending
-      if (!basePayload.action || !basePayload.flowId || !basePayload.access_token) {
+      if (!requestPayload.action || !requestPayload.flowId || !requestPayload.access_token) {
         const errorMsg = "Invalid payload - missing required fields";
         addDebugInfo(`❌ ${errorMsg}`, true);
-        addDebugInfo(`  - Action: ${!!basePayload.action}`, true);
-        addDebugInfo(`  - FlowId: ${!!basePayload.flowId}`, true);
-        addDebugInfo(`  - Access Token: ${!!basePayload.access_token}`, true);
+        addDebugInfo(`  - Action: ${!!requestPayload.action}`, true);
+        addDebugInfo(`  - FlowId: ${!!requestPayload.flowId}`, true);
+        addDebugInfo(`  - Access Token: ${!!requestPayload.access_token}`, true);
         toast({
           title: "🔴 Payload Error",
           description: errorMsg,
@@ -102,27 +102,28 @@ export const useFlowOperations = (
         return;
       }
 
-      addDebugInfo(`📦 Payload prepared with ${Object.keys(basePayload).length} keys`);
+      addDebugInfo(`📦 Enhanced payload prepared with ${Object.keys(requestPayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
+      addDebugInfo(`📋 Payload size: ${JSON.stringify(requestPayload).length} characters`);
 
-      // Step 5: Primary method attempt with enhanced error handling
-      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke");
+      // Step 5: Primary method with fixed payload transmission
+      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke with fixed payload");
       let response;
       let attemptMethod = "primary";
       
       try {
-        addDebugInfo("🌐 Calling supabase.functions.invoke...");
+        addDebugInfo("🌐 Calling supabase.functions.invoke with proper payload...");
+        addDebugInfo(`📤 Sending payload: ${JSON.stringify(requestPayload).substring(0, 150)}...`);
         
         const invokeStartTime = performance.now();
         response = await supabase.functions.invoke('apps-script-proxy', {
-          body: basePayload,
+          body: requestPayload,
           headers: {
-            'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json',
-            'X-Debug-Source': 'flowmanager-primary',
-            'X-User-Agent': 'FlowState-WebApp/2.0',
+            'X-Debug-Source': 'flowmanager-primary-fixed',
+            'X-User-Agent': 'FlowState-WebApp/3.0',
             'X-Flow-ID': flow.id,
-            'X-Request-Source': 'web-client'
+            'X-Request-Source': 'web-client-fixed'
           }
         });
         const invokeEndTime = performance.now();
@@ -136,7 +137,6 @@ export const useFlowOperations = (
           addDebugInfo(`  - Error type: ${typeof response.error}`, true);
           addDebugInfo(`  - Error message: ${response.error.message || 'No message'}`, true);
           addDebugInfo(`  - Error name: ${response.error.name || 'Unknown'}`, true);
-          addDebugInfo(`  - Error context: ${JSON.stringify(response.error.context || {})}`, true);
         } else {
           addDebugInfo(`✅ Primary method success data:`);
           addDebugInfo(`  - Data keys: ${response.data ? Object.keys(response.data).join(', ') : 'No data'}`);
@@ -146,10 +146,9 @@ export const useFlowOperations = (
         addDebugInfo(`💥 Primary method threw exception:`, true);
         addDebugInfo(`  - Error name: ${invokeError.name}`, true);
         addDebugInfo(`  - Error message: ${invokeError.message}`, true);
-        addDebugInfo(`  - Error stack: ${invokeError.stack?.substring(0, 200)}...`, true);
         
-        // Step 6: Fallback method with better error details
-        addDebugInfo("📋 Step 6: Fallback method - direct fetch");
+        // Step 6: Enhanced fallback method with proper payload
+        addDebugInfo("📋 Step 6: Enhanced fallback method - direct fetch with payload");
         attemptMethod = "fallback";
         
         try {
@@ -157,19 +156,19 @@ export const useFlowOperations = (
           addDebugInfo(`🌐 Fallback URL: ${edgeFunctionUrl}`);
           
           const fallbackPayload = {
-            ...basePayload,
+            ...requestPayload,
             debug_info: {
-              ...basePayload.debug_info,
+              ...requestPayload.debug_info,
               fallback_attempt: true,
               primary_error: invokeError.message,
-              method: 'direct_fetch',
-              attempt_number: 2,
-              primary_error_name: invokeError.name,
-              primary_error_stack: invokeError.stack?.substring(0, 100)
+              method: 'direct_fetch_fixed',
+              attempt_number: 2
             }
           };
 
-          addDebugInfo("📤 Making direct fetch request...");
+          addDebugInfo("📤 Making direct fetch request with payload...");
+          addDebugInfo(`📋 Fallback payload size: ${JSON.stringify(fallbackPayload).length} characters`);
+          
           const fetchStartTime = performance.now();
           
           const fetchResponse = await fetch(edgeFunctionUrl, {
@@ -178,10 +177,10 @@ export const useFlowOperations = (
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
               'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-              'X-Debug-Source': 'flowmanager-fallback',
-              'X-User-Agent': 'FlowState-WebApp/2.0',
+              'X-Debug-Source': 'flowmanager-fallback-fixed',
+              'X-User-Agent': 'FlowState-WebApp/3.0',
               'X-Flow-ID': flow.id,
-              'X-Request-Source': 'web-client-fallback'
+              'X-Request-Source': 'web-client-fallback-fixed'
             },
             body: JSON.stringify(fallbackPayload)
           });
@@ -189,21 +188,16 @@ export const useFlowOperations = (
           const fetchEndTime = performance.now();
           addDebugInfo(`⏱️ Fallback method completed in ${Math.round(fetchEndTime - fetchStartTime)}ms`);
           addDebugInfo(`📊 Fallback response status: ${fetchResponse.status} ${fetchResponse.statusText}`);
-          
-          const responseHeaders = Object.fromEntries(fetchResponse.headers.entries());
-          addDebugInfo(`📋 Fallback response headers: ${JSON.stringify(responseHeaders)}`);
 
           let responseData;
           const responseText = await fetchResponse.text();
           addDebugInfo(`📄 Raw response length: ${responseText.length} chars`);
-          addDebugInfo(`📄 Raw response preview: ${responseText.substring(0, 200)}${responseText.length > 200 ? '...' : ''}`);
           
           try {
             responseData = JSON.parse(responseText);
             addDebugInfo(`✅ Successfully parsed JSON response`);
           } catch (jsonError) {
             addDebugInfo(`❌ Failed to parse JSON: ${jsonError.message}`, true);
-            addDebugInfo(`📄 Response text preview: ${responseText.substring(0, 500)}...`, true);
             throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`);
           }
 
@@ -213,12 +207,7 @@ export const useFlowOperations = (
               message: responseData.error || `HTTP ${fetchResponse.status}: ${fetchResponse.statusText}`,
               status: fetchResponse.status,
               details: responseData,
-              name: 'HTTPError',
-              context: {
-                status: fetchResponse.status,
-                statusText: fetchResponse.statusText,
-                headers: responseHeaders
-              }
+              name: 'HTTPError'
             }
           };
 
@@ -226,19 +215,14 @@ export const useFlowOperations = (
 
         } catch (fetchError) {
           addDebugInfo(`💥 Fallback method also failed:`, true);
-          addDebugInfo(`  - Error name: ${fetchError.name}`, true);
           addDebugInfo(`  - Error message: ${fetchError.message}`, true);
           throw fetchError;
         }
       }
 
-      // Step 7: Response analysis with enhanced debugging
-      addDebugInfo(`📋 Step 7: Response analysis (${attemptMethod} method)`);
-      addDebugInfo(`🔍 Response structure analysis:`);
-      addDebugInfo(`  - Has error: ${!!response.error}`);
-      addDebugInfo(`  - Has data: ${!!response.data}`);
-      addDebugInfo(`  - Response type: ${typeof response}`);
-
+      // Step 7: Enhanced response analysis
+      addDebugInfo(`📋 Step 7: Enhanced response analysis (${attemptMethod} method)`);
+      
       if (response.error) {
         addDebugInfo(`❌ === ERROR ANALYSIS ===`, true);
         const errorMessage = response.error.message || 'Unknown error';
@@ -249,17 +233,13 @@ export const useFlowOperations = (
         addDebugInfo(`  - Name: "${errorName}"`, true);
         addDebugInfo(`  - Message: "${errorMessage}"`, true);
         addDebugInfo(`  - Status: ${errorStatus}`, true);
-        addDebugInfo(`  - Full error: ${JSON.stringify(response.error)}`, true);
         
-        // Enhanced error categorization with better matching
+        // Enhanced error categorization
         if (errorMessage.includes('401') || 
             errorMessage.includes('Unauthorized') || 
-            errorMessage.includes('Invalid authentication token') || 
-            errorStatus === 401 ||
-            errorMessage.includes('authentication expired') ||
-            errorMessage.includes('auth')) {
-          const authErrorMsg = "🔐 Google authentication has expired. Please sign in with Google again to refresh your permissions.";
-          addDebugInfo(`🔐 Authentication error detected: ${authErrorMsg}`, true);
+            errorStatus === 401) {
+          const authErrorMsg = "🔐 Google authentication has expired. Please sign in with Google again.";
+          addDebugInfo(`🔐 Authentication error: ${authErrorMsg}`, true);
           setAuthError(authErrorMsg);
           toast({
             title: "🔴 Authentication Expired",
@@ -269,12 +249,9 @@ export const useFlowOperations = (
           return;
         }
         
-        if (errorMessage.includes('Google OAuth token not found') || 
-            errorMessage.includes('requiresGoogleAuth') || 
-            errorMessage.includes('Google OAuth required') ||
-            errorMessage.includes('Google authentication') ||
-            errorMessage.includes('sign in with Google')) {
-          const googleAuthMsg = "🔗 Google authentication is required. Please sign in with Google to access Gmail and Drive.";
+        if (errorMessage.includes('Google OAuth') || 
+            errorMessage.includes('requiresGoogleAuth')) {
+          const googleAuthMsg = "🔗 Google authentication required. Please sign in with Google.";
           addDebugInfo(`🔗 Google OAuth error: ${googleAuthMsg}`, true);
           setAuthError(googleAuthMsg);
           toast({
@@ -287,11 +264,8 @@ export const useFlowOperations = (
 
         if (errorMessage.includes('403') || 
             errorMessage.includes('Forbidden') || 
-            errorMessage.includes('requiresPermissions') || 
-            errorStatus === 403 ||
-            errorMessage.includes('permissions') ||
-            errorMessage.includes('access denied')) {
-          const permissionMsg = "🚫 Google permissions denied. Please ensure you grant access to Gmail and Drive when signing in.";
+            errorStatus === 403) {
+          const permissionMsg = "🚫 Google permissions denied. Please grant access to Gmail and Drive.";
           addDebugInfo(`🚫 Permission error: ${permissionMsg}`, true);
           setAuthError(permissionMsg);
           toast({
@@ -302,22 +276,7 @@ export const useFlowOperations = (
           return;
         }
 
-        if (errorMessage.includes('Edge Function returned a non-2xx status code') ||
-            errorName === 'FunctionsHttpError') {
-          const serverErrorMsg = "🖥️ Server configuration issue detected. The Apps Script service may be unavailable or misconfigured.";
-          addDebugInfo(`🖥️ Server error: ${serverErrorMsg}`, true);
-          setAuthError(serverErrorMsg);
-          toast({
-            title: "🔴 Server Error",
-            description: serverErrorMsg,
-            variant: "destructive"
-          });
-          return;
-        }
-
-        // Generic error handling with more details
-        addDebugInfo(`💥 Unhandled error category: ${errorMessage}`, true);
-        addDebugInfo(`💥 Error context: ${JSON.stringify(response.error.context || {})}`, true);
+        // Generic error handling
         toast({
           title: "🔴 Flow Execution Failed",
           description: `Error: ${errorMessage}`,
@@ -329,35 +288,21 @@ export const useFlowOperations = (
       // Step 8: Success handling
       addDebugInfo(`✅ === SUCCESS ANALYSIS ===`);
       addDebugInfo(`🎉 Flow execution completed successfully!`);
-      addDebugInfo(`📊 Success data details:`);
       
       if (response.data) {
-        addDebugInfo(`  - Data keys: ${Object.keys(response.data).join(', ')}`);
-        addDebugInfo(`  - Data preview: ${JSON.stringify(response.data).substring(0, 200)}...`);
-        addDebugInfo(`  - Request ID: ${response.data.request_id || 'N/A'}`);
-        addDebugInfo(`  - Processing time: ${response.data.processing_time || 'N/A'}`);
+        addDebugInfo(`📊 Success data: ${JSON.stringify(response.data).substring(0, 200)}...`);
       }
 
       toast({
         title: "🎉 Flow Executed Successfully!",
-        description: `${flow.flow_name} has been executed. Check your Google Drive folder for the saved attachments.`,
+        description: `${flow.flow_name} has been executed. Check your Google Drive folder for saved attachments.`,
       });
 
       addDebugInfo(`🏁 === FLOW EXECUTION COMPLETED SUCCESSFULLY ===`);
 
     } catch (error) {
-      addDebugInfo(`💥 === UNEXPECTED ERROR IN FLOW EXECUTION ===`, true);
-      addDebugInfo(`🔍 Error analysis:`, true);
-      addDebugInfo(`  - Error name: ${error.name}`, true);
-      addDebugInfo(`  - Error message: ${error.message}`, true);
-      addDebugInfo(`  - Error type: ${typeof error}`, true);
-      addDebugInfo(`  - Error constructor: ${error.constructor.name}`, true);
-      
-      if (error.stack) {
-        addDebugInfo(`  - Stack trace: ${error.stack.substring(0, 300)}...`, true);
-      }
-      
-      console.error('🔴 Complete error object:', error);
+      addDebugInfo(`💥 === UNEXPECTED ERROR ===`, true);
+      addDebugInfo(`🔍 Error: ${error.message}`, true);
       
       toast({
         title: "🔴 Unexpected Error",
@@ -368,7 +313,6 @@ export const useFlowOperations = (
       setRunningFlows(prev => {
         const newSet = new Set(prev);
         newSet.delete(flow.id);
-        console.log(`[FLOW DEBUG] Flow execution cleanup completed for: ${flow.flow_name}`);
         return newSet;
       });
     }
