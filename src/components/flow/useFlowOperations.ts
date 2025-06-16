@@ -46,8 +46,154 @@ export const useFlowOperations = (
   const { toast } = useToast();
   const { user, session } = useAuth();
 
+  // Direct Apps Script test function
+  const testDirectAppsScript = useCallback(async (flowId: string) => {
+    addDebugInfo('[DIRECT TEST] Starting direct Apps Script test...');
+    
+    try {
+      // Get the flow configuration from database using correct table name
+      addDebugInfo('[DIRECT TEST] Fetching flow configuration from database...');
+      const { data: flow, error: flowError } = await supabase
+        .from('user_configurations')
+        .select('*')
+        .eq('id', flowId)
+        .eq('user_id', user?.id)
+        .single();
+
+      if (flowError) {
+        addDebugInfo(`[DIRECT TEST] Database error: ${flowError.message}`, true);
+        throw new Error(`Database error: ${flowError.message}`);
+      }
+
+      if (!flow) {
+        addDebugInfo('[DIRECT TEST] Flow not found in database', true);
+        throw new Error('Flow not found');
+      }
+
+      addDebugInfo(`[DIRECT TEST] Flow found: ${flow.flow_name}`);
+      addDebugInfo(`[DIRECT TEST] Email filter: ${flow.email_filter}`);
+      addDebugInfo(`[DIRECT TEST] Drive folder: ${flow.drive_folder}`);
+
+      // Create the EXACT payload that Apps Script expects
+      const payload = {
+        auth_token: "deff633d-63d3-4c4f-947b-61a7842bab29", // Apps Script secret
+        action: "process_gmail_flow",
+        userConfig: {
+          emailFilter: flow.email_filter,
+          driveFolder: flow.drive_folder,
+          fileTypes: flow.file_types || [],
+          userId: flow.user_id,
+          flowName: flow.flow_name,
+          maxEmails: 5 // Reduced for faster testing
+        },
+        googleTokens: null
+      };
+
+      addDebugInfo('[DIRECT TEST] Payload created for Apps Script:');
+      addDebugInfo(`- auth_token present: ${!!payload.auth_token}`);
+      addDebugInfo(`- action: ${payload.action}`);
+      addDebugInfo(`- emailFilter: ${payload.userConfig.emailFilter}`);
+      addDebugInfo(`- driveFolder: ${payload.userConfig.driveFolder}`);
+      addDebugInfo(`- maxEmails: ${payload.userConfig.maxEmails}`);
+
+      const payloadString = JSON.stringify(payload);
+      addDebugInfo(`[DIRECT TEST] Payload size: ${payloadString.length} characters`);
+      addDebugInfo(`[DIRECT TEST] Payload preview: ${payloadString.substring(0, 200)}...`);
+
+      // Call Apps Script directly (bypass Edge Function completely)
+      const appsScriptUrl = 'https://script.google.com/macros/s/AKfycbxqRLyD5famZnHY3W-sTnsYEjyxQ6Q02gcKSQba2Bw6tqTTpimZ2up0WlPKQYII-dvA/exec';
+      
+      addDebugInfo('[DIRECT TEST] Calling Apps Script directly...');
+      addDebugInfo(`[DIRECT TEST] URL: ${appsScriptUrl}`);
+      
+      const startTime = Date.now();
+      
+      const response = await fetch(appsScriptUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: payloadString,
+        mode: 'cors'
+      });
+      
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+      
+      addDebugInfo(`[DIRECT TEST] Response received in ${duration}ms`);
+      addDebugInfo(`[DIRECT TEST] Status: ${response.status}`);
+      addDebugInfo(`[DIRECT TEST] Status Text: ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        addDebugInfo(`[DIRECT TEST] ❌ Error response body: ${errorText.substring(0, 200)}`, true);
+        
+        // Check if it's HTML (login page)
+        if (errorText.trim().startsWith('<!DOCTYPE') || errorText.trim().startsWith('<html')) {
+          addDebugInfo('[DIRECT TEST] ❌ Received HTML login page - deployment settings wrong', true);
+          throw new Error('Apps Script deployment requires authentication. Check deployment settings.');
+        }
+        
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      addDebugInfo('[DIRECT TEST] ✅ SUCCESS!');
+      addDebugInfo(`[DIRECT TEST] Response structure: ${Object.keys(result).join(', ')}`);
+      addDebugInfo(`[DIRECT TEST] Status: ${result.status}`);
+      addDebugInfo(`[DIRECT TEST] Message: ${result.message}`);
+      
+      if (result.data) {
+        addDebugInfo('[DIRECT TEST] Data received:');
+        addDebugInfo(`- Processed: ${result.data.processed}`);
+        addDebugInfo(`- Attachments: ${result.data.attachments}`);
+        addDebugInfo(`- Files: ${result.data.files?.length || 0}`);
+        addDebugInfo(`- Errors: ${result.data.errors?.length || 0}`);
+        
+        if (result.data.attachments > 0) {
+          addDebugInfo(`[DIRECT TEST] 🎉 Successfully processed ${result.data.attachments} attachments!`);
+          
+          if (result.data.files && result.data.files.length > 0) {
+            addDebugInfo('[DIRECT TEST] Saved files:');
+            result.data.files.forEach((file: any, index: number) => {
+              addDebugInfo(`[DIRECT TEST] ${index + 1}. ${file.name} (${file.size} bytes)`);
+              addDebugInfo(`[DIRECT TEST]    Drive URL: ${file.url}`);
+            });
+            
+            toast({
+              title: "🎉 Direct Test Success!",
+              description: `Processed ${result.data.attachments} attachments and saved them to Drive folder "${payload.userConfig.driveFolder}"`,
+            });
+          }
+        } else {
+          addDebugInfo('[DIRECT TEST] ⚠️ No attachments were processed');
+          addDebugInfo('[DIRECT TEST] This might mean no matching emails were found');
+          
+          toast({
+            title: "⚠️ No Attachments Found",
+            description: "The direct test worked, but no matching emails with attachments were found.",
+          });
+        }
+      }
+      
+      return result;
+
+    } catch (error) {
+      addDebugInfo(`[DIRECT TEST] ❌ Failed: ${error.message}`, true);
+      
+      toast({
+        title: "🔴 Direct Test Failed",
+        description: `Error: ${error.message}`,
+        variant: "destructive"
+      });
+      
+      throw error;
+    }
+  }, [addDebugInfo, toast, user?.id]);
+
   const runFlow = useCallback(async (flow: UserFlow) => {
-    addDebugInfo(`🚀 === STARTING FLOW EXECUTION: ${flow.flow_name} ===`);
+    addDebugInfo(`🚀 === STARTING DIRECT TEST FOR FLOW: ${flow.flow_name} ===`);
     setAuthError(null);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
@@ -66,141 +212,39 @@ export const useFlowOperations = (
         return;
       }
 
-      // Step 2: Enhanced session logging
-      addDebugInfo("📋 Step 2: Enhanced session analysis");
-      logSessionDetails();
+      addDebugInfo("✅ Session validated");
+      addDebugInfo(`👤 User ID: ${session.user?.id}`);
+      addDebugInfo(`📧 User Email: ${session.user?.email}`);
 
-      // Step 3: Token preparation with validation
-      addDebugInfo("📋 Step 3: Enhanced token preparation");
-      const authToken = session.access_token;
-      
-      if (!authToken) {
-        const errorMsg = "No access token in session - re-authentication required";
-        addDebugInfo(`❌ ${errorMsg}`, true);
-        setAuthError(errorMsg);
+      // Step 2: Run direct Apps Script test
+      addDebugInfo("📋 Step 2: Running direct Apps Script test");
+      const result = await testDirectAppsScript(flow.id);
+
+      addDebugInfo(`✅ === DIRECT TEST COMPLETED SUCCESSFULLY ===`);
+      addDebugInfo(`🎉 Flow execution completed!`);
+
+      if (result && result.data && result.data.attachments > 0) {
         toast({
-          title: "🔴 Token Missing",
-          description: errorMsg,
-          variant: "destructive"
+          title: "🎉 Flow Executed Successfully!",
+          description: `${flow.flow_name} processed ${result.data.attachments} attachments successfully.`,
         });
-        return;
-      }
-
-      addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
-
-      // Step 4: Direct fetch payload preparation
-      addDebugInfo("📋 Step 4: Direct fetch payload preparation");
-      const requestPayload = {
-        action: 'run_flow',
-        flowId: flow.id,
-        access_token: authToken,
-        debug_info: {
-          timestamp: new Date().toISOString(),
-          user_id: session.user?.id,
-          user_email: session.user?.email,
-          provider: session.user?.app_metadata?.provider,
-          flow_name: flow.flow_name,
-          client_version: '9.0-direct-fetch-fix',
-          request_source: 'frontend-flowmanager-direct-fetch',
-          network_debug: true,
-          retry_enabled: true
-        }
-      };
-
-      const payloadString = JSON.stringify(requestPayload);
-      addDebugInfo(`📦 Payload prepared: ${payloadString.length} characters`);
-      addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
-      addDebugInfo(`📄 Payload preview: ${payloadString.substring(0, 100)}...`);
-
-      // Step 5: Direct fetch execution (bypassing supabase.functions.invoke)
-      addDebugInfo("📋 Step 5: Direct fetch execution");
-      
-      const executeDirectFetch = async () => {
-        addDebugInfo("🌐 Using direct fetch to bypass invoke() issues...");
-        
-        const fetchStartTime = performance.now();
-        
-        const response = await fetch('https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`,
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-            'x-debug-source': 'flowmanager-direct-fetch-v9',
-            'x-user-agent': 'FlowState-WebApp/9.0-direct-fetch-fix'
-          },
-          body: payloadString
-        });
-        
-        const fetchEndTime = performance.now();
-        addDebugInfo(`⏱️ Direct fetch completed in ${Math.round(fetchEndTime - fetchStartTime)}ms`);
-        addDebugInfo(`📊 Response status: ${response.status} ${response.statusText}`);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          addDebugInfo(`❌ HTTP Error: ${response.status}`, true);
-          addDebugInfo(`❌ Error body: ${errorText.substring(0, 200)}`, true);
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-
-        const result = await response.json();
-        addDebugInfo(`✅ Direct fetch successful`);
-        
-        if (result.request_id) {
-          addDebugInfo(`🔍 Request ID: ${result.request_id}`);
-        }
-        
-        return result;
-      };
-
-      let response;
-      try {
-        response = await retryWithBackoff(executeDirectFetch, 3, 1000);
-        
-      } catch (directFetchError) {
-        addDebugInfo(`💥 Direct fetch failed:`, true);
-        addDebugInfo(`- Error: ${directFetchError.message}`, true);
-        
+      } else {
         toast({
-          title: "🔴 Network Connection Error",
-          description: `Direct fetch failed: ${directFetchError.message}`,
-          variant: "destructive"
+          title: "✅ Flow Test Completed",
+          description: `${flow.flow_name} test completed - no attachments found to process.`,
         });
-        return;
       }
 
-      // Step 6: Enhanced success handling
-      addDebugInfo(`✅ === DIRECT FETCH SUCCESS ===`);
-      addDebugInfo(`🎉 Flow execution completed successfully!`);
-      
-      if (response) {
-        addDebugInfo(`📊 Response data received`);
-        addDebugInfo(`📋 Response keys: ${Object.keys(response).join(', ')}`);
-        
-        if (response.request_id) {
-          addDebugInfo(`🔍 Request ID: ${response.request_id}`);
-        }
-        
-        if (response.message) {
-          addDebugInfo(`📝 Response message: ${response.message}`);
-        }
-      }
-
-      toast({
-        title: "🎉 Flow Executed Successfully!",
-        description: `${flow.flow_name} has been executed using direct fetch method.`,
-      });
-
-      addDebugInfo(`🏁 === DIRECT FETCH FLOW EXECUTION COMPLETED ===`);
+      addDebugInfo(`🏁 === DIRECT TEST FLOW EXECUTION COMPLETED ===`);
 
     } catch (error) {
-      addDebugInfo(`💥 === UNEXPECTED ERROR IN DIRECT FETCH VERSION ===`, true);
+      addDebugInfo(`💥 === DIRECT TEST ERROR ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
       addDebugInfo(`🔍 Error type: ${error.constructor.name}`, true);
       
       toast({
-        title: "🔴 Unexpected Error",
-        description: `Direct fetch error: ${error.message}`,
+        title: "🔴 Direct Test Error",
+        description: `Direct test error: ${error.message}`,
         variant: "destructive"
       });
     } finally {
@@ -210,7 +254,7 @@ export const useFlowOperations = (
         return newSet;
       });
     }
-  }, [session, addDebugInfo, logSessionDetails, toast]);
+  }, [session, addDebugInfo, toast, testDirectAppsScript]);
 
   const deleteFlow = useCallback(async (flowId: string) => {
     addDebugInfo(`🗑️ Starting flow deletion: ${flowId}`);
