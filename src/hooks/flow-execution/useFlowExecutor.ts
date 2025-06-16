@@ -60,15 +60,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       toast({
         title: "🔴 Token Issue",
         description: errorMsg,
-        variant: "destructive",
-        action: (
-          <button 
-            onClick={refreshSession}
-            className="px-3 py-1 bg-white text-black rounded text-sm"
-          >
-            Refresh Auth
-          </button>
-        )
+        variant: "destructive"
       });
       return null;
     }
@@ -164,15 +156,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
           toast({
             title: "🔐 Authentication Error",
             description: "Your Google authentication has expired. Please refresh and try again.",
-            variant: "destructive",
-            action: (
-              <button 
-                onClick={refreshSession}
-                className="px-3 py-1 bg-white text-black rounded text-sm"
-              >
-                Refresh Auth
-              </button>
-            )
+            variant: "destructive"
           });
         } else {
           toast({
@@ -203,15 +187,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         toast({
           title: "🔐 Authentication Error",
           description: "Please refresh your authentication and try again.",
-          variant: "destructive",
-          action: (
-            <button 
-              onClick={refreshSession}
-              className="px-3 py-1 bg-white text-black rounded text-sm"
-            >
-              Refresh Auth
-            </button>
-          )
+          variant: "destructive"
         });
       } else {
         addLog(`❌ Flow execution failed: ${errorMessage}`, true, { duration: executionTime });
