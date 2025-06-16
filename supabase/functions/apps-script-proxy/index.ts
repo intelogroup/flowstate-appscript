@@ -75,7 +75,7 @@ serve(async (req) => {
       }, 500);
     }
 
-    // Enhanced request body parsing with size validation
+    // Enhanced request body parsing with improved empty body handling
     let originalPayload: RequestBody
     try {
       const bodyText = await req.text();
@@ -84,6 +84,33 @@ serve(async (req) => {
         preview: bodyText.substring(0, 100),
         request_id: debugInfo.request_id 
       });
+
+      // Check for empty body specifically
+      if (!bodyText || bodyText.trim().length === 0) {
+        logNetworkEvent('EMPTY_BODY_ERROR', { 
+          request_id: debugInfo.request_id,
+          headers: Object.fromEntries(req.headers.entries())
+        });
+        return createCorsResponse({
+          error: 'Empty request body received',
+          request_id: debugInfo.request_id,
+          troubleshooting: {
+            message: 'No payload data was sent with the request',
+            steps: [
+              '1. Verify the frontend is sending a valid JSON payload',
+              '2. Check if the request is being intercepted or modified',
+              '3. Ensure the Content-Type header is set to application/json',
+              '4. Try refreshing the page and attempting the request again'
+            ]
+          },
+          debug_info: {
+            method: req.method,
+            url: req.url,
+            headers: Object.fromEntries(req.headers.entries()),
+            body_length: bodyText.length
+          }
+        }, 400);
+      }
 
       if (bodyText.length > 1024 * 1024) { // 1MB limit
         throw createRetryableError('Request payload too large (>1MB)', false);
@@ -106,7 +133,16 @@ serve(async (req) => {
       return createCorsResponse({
         error: 'Invalid JSON in request body',
         details: error.message,
-        request_id: debugInfo.request_id
+        request_id: debugInfo.request_id,
+        troubleshooting: {
+          message: 'The request body could not be parsed as valid JSON',
+          steps: [
+            '1. Check that the frontend is sending valid JSON data',
+            '2. Verify there are no special characters breaking the JSON',
+            '3. Try using a different browser or clearing cache',
+            '4. Check the browser console for any errors'
+          ]
+        }
       }, 400);
     }
 

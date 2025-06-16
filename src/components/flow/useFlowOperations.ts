@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -87,8 +88,8 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Enhanced payload preparation
-      addDebugInfo("📋 Step 4: Enhanced payload preparation with v2 debugging");
+      // Step 4: Enhanced payload preparation with explicit serialization check
+      addDebugInfo("📋 Step 4: Enhanced payload preparation with serialization validation");
       const requestPayload = {
         action: 'run_flow',
         flowId: flow.id,
@@ -99,8 +100,8 @@ export const useFlowOperations = (
           user_email: session.user?.email,
           provider: session.user?.app_metadata?.provider,
           flow_name: flow.flow_name,
-          client_version: '8.0-enhanced-cors-v2',
-          request_source: 'frontend-flowmanager-v2',
+          client_version: '8.0-enhanced-empty-body-fix',
+          request_source: 'frontend-flowmanager-v3',
           network_debug: true,
           retry_enabled: true
         }
@@ -109,23 +110,42 @@ export const useFlowOperations = (
       addDebugInfo(`📦 Enhanced payload prepared with ${Object.keys(requestPayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
       
-      const payloadString = JSON.stringify(requestPayload);
-      addDebugInfo(`📏 Payload size: ${payloadString.length} characters`);
+      // Validate serialization before sending
+      let payloadString: string;
+      try {
+        payloadString = JSON.stringify(requestPayload);
+        addDebugInfo(`📏 Payload serialized successfully: ${payloadString.length} characters`);
+        
+        // Verify the serialized payload can be parsed back
+        JSON.parse(payloadString);
+        addDebugInfo(`✅ Payload serialization validated`);
+      } catch (serializationError) {
+        addDebugInfo(`❌ Payload serialization failed: ${serializationError.message}`, true);
+        toast({
+          title: "🔴 Payload Error",
+          description: "Failed to serialize request data",
+          variant: "destructive"
+        });
+        return;
+      }
 
-      // Step 5: Enhanced network operation with retry logic
-      addDebugInfo("📋 Step 5: Enhanced network operation with retry logic");
+      // Step 5: Enhanced network operation with request body validation
+      addDebugInfo("📋 Step 5: Enhanced network operation with body validation");
       
       const executeRequest = async () => {
-        addDebugInfo("🌐 Executing supabase.functions.invoke with enhanced CORS...");
+        addDebugInfo("🌐 Executing supabase.functions.invoke with validated payload...");
         
         const invokeStartTime = performance.now();
         
+        // Log the exact payload being sent
+        addDebugInfo(`📤 Sending payload: ${payloadString.substring(0, 100)}...`);
+        
         const response = await supabase.functions.invoke('apps-script-proxy', {
-          body: requestPayload,
+          body: requestPayload, // Send the object, not the string
           headers: {
             'Content-Type': 'application/json',
-            'x-debug-source': 'flowmanager-enhanced-v2',
-            'x-user-agent': 'FlowState-WebApp/8.0-enhanced-cors'
+            'x-debug-source': 'flowmanager-enhanced-v3',
+            'x-user-agent': 'FlowState-WebApp/8.0-enhanced-empty-body-fix'
           }
         });
         
@@ -153,8 +173,8 @@ export const useFlowOperations = (
         addDebugInfo(`💥 All retry attempts failed:`, true);
         addDebugInfo(`- Final error: ${retryError.message}`, true);
         
-        // Enhanced fallback with better error handling
-        addDebugInfo("📋 Step 6: Enhanced fallback method with improved headers");
+        // Enhanced fallback with explicit headers and body validation
+        addDebugInfo("📋 Step 6: Enhanced fallback method with validated payload");
         
         try {
           const fallbackUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
@@ -167,9 +187,13 @@ export const useFlowOperations = (
               fallback_attempt: true,
               primary_error: retryError.message,
               fallback_timestamp: new Date().toISOString(),
-              fallback_version: 'v2-enhanced'
+              fallback_version: 'v3-enhanced-empty-body-fix'
             }
           };
+          
+          // Validate fallback payload serialization
+          const fallbackPayloadString = JSON.stringify(fallbackPayload);
+          addDebugInfo(`📤 Fallback payload size: ${fallbackPayloadString.length} chars`);
           
           const fallbackStartTime = performance.now();
           
@@ -179,12 +203,12 @@ export const useFlowOperations = (
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
               'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-              'x-debug-source': 'flowmanager-fallback-enhanced-v2',
+              'x-debug-source': 'flowmanager-fallback-enhanced-v3',
               'x-user-agent': 'FlowState-WebApp/8.0-fallback-enhanced',
               'Origin': window.location.origin,
               'Referer': window.location.href
             },
-            body: JSON.stringify(fallbackPayload),
+            body: fallbackPayloadString, // Send as string for direct fetch
             mode: 'cors',
             credentials: 'omit'
           });
@@ -223,7 +247,7 @@ export const useFlowOperations = (
           
           toast({
             title: "🔴 Complete Network Failure",
-            description: "Unable to reach the Edge Function despite enhanced CORS. Please check your network connection.",
+            description: "Unable to reach the Edge Function. Please check your network connection.",
             variant: "destructive"
           });
           return;
@@ -266,6 +290,17 @@ export const useFlowOperations = (
           return;
         }
 
+        if (errorMessage.includes('Empty request body')) {
+          const emptyBodyErrorMsg = "📦 Empty request body detected. Check frontend payload generation.";
+          addDebugInfo(emptyBodyErrorMsg, true);
+          toast({
+            title: "🔴 Payload Error",
+            description: emptyBodyErrorMsg,
+            variant: "destructive"
+          });
+          return;
+        }
+
         // Generic error handling with request ID
         const requestId = response.data?.request_id || 'unknown';
         toast({
@@ -295,7 +330,7 @@ export const useFlowOperations = (
 
       toast({
         title: "🎉 Flow Executed Successfully!",
-        description: `${flow.flow_name} has been executed with enhanced CORS support.`,
+        description: `${flow.flow_name} has been executed with enhanced payload validation.`,
       });
 
       addDebugInfo(`🏁 === ENHANCED FLOW EXECUTION COMPLETED ===`);
