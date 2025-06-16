@@ -4,44 +4,85 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-debug-source, x-user-agent',
 }
 
+// Enhanced logging function
+const logWithTimestamp = (level: string, message: string, data?: any) => {
+  const timestamp = new Date().toISOString();
+  const emoji = level === 'ERROR' ? '🔴' : level === 'SUCCESS' ? '✅' : level === 'WARN' ? '⚠️' : '🔍';
+  console.log(`${emoji} [${timestamp}] [${level}] ${message}`);
+  if (data) {
+    console.log(`📊 [${timestamp}] [DATA] ${JSON.stringify(data, null, 2)}`);
+  }
+};
+
 serve(async (req) => {
+  const requestId = crypto.randomUUID().substring(0, 8);
+  logWithTimestamp('INFO', `=== REQUEST START [${requestId}] ===`);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    console.log('✅ CORS preflight request handled successfully')
+    logWithTimestamp('INFO', `CORS preflight request handled [${requestId}]`);
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    console.log('🚀 === EDGE FUNCTION EXECUTION START ===')
-    console.log(`📥 Request method: ${req.method}`)
-    console.log(`🌐 Request URL: ${req.url}`)
-    console.log(`📋 Request headers:`, Object.fromEntries(req.headers.entries()))
+    logWithTimestamp('INFO', `Processing ${req.method} request to ${req.url} [${requestId}]`);
+    
+    // Log all request headers for debugging
+    const requestHeaders = Object.fromEntries(req.headers.entries());
+    logWithTimestamp('INFO', `Request headers [${requestId}]:`, requestHeaders);
 
     // Create supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY');
+    
+    logWithTimestamp('INFO', `Supabase config [${requestId}]:`, {
+      url_present: !!supabaseUrl,
+      key_present: !!supabaseKey,
+      url_preview: supabaseUrl?.substring(0, 30) + '...'
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      supabaseUrl ?? '',
+      supabaseKey ?? '',
       {
         global: {
           headers: { Authorization: req.headers.get('Authorization')! },
         },
       }
-    )
+    );
 
-    console.log(`🔗 Supabase client created with URL: ${Deno.env.get('SUPABASE_URL')}`)
-
-    // Parse request body with error handling
+    // Parse request body with comprehensive error handling
     let requestBody;
     try {
-      requestBody = await req.json()
-      console.log(`📦 Request body parsed successfully:`, JSON.stringify(requestBody, null, 2))
+      const bodyText = await req.text();
+      logWithTimestamp('INFO', `Raw request body length: ${bodyText.length} chars [${requestId}]`);
+      
+      if (!bodyText.trim()) {
+        throw new Error('Empty request body');
+      }
+      
+      requestBody = JSON.parse(bodyText);
+      logWithTimestamp('SUCCESS', `Request body parsed successfully [${requestId}]`, {
+        keys: Object.keys(requestBody),
+        action: requestBody.action,
+        flowId: requestBody.flowId,
+        has_access_token: !!requestBody.access_token,
+        token_length: requestBody.access_token?.length
+      });
     } catch (parseError) {
-      console.error(`❌ Failed to parse request body:`, parseError)
+      logWithTimestamp('ERROR', `Failed to parse request body [${requestId}]:`, {
+        error: parseError.message,
+        error_type: parseError.constructor.name
+      });
       return new Response(
-        JSON.stringify({ error: 'Invalid JSON in request body', details: parseError.message }),
+        JSON.stringify({ 
+          error: 'Invalid JSON in request body', 
+          details: parseError.message,
+          request_id: requestId
+        }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -49,33 +90,61 @@ serve(async (req) => {
       )
     }
 
-    // Enhanced token extraction and validation
-    let token = req.headers.get('Authorization')?.replace('Bearer ', '')
-    console.log(`🔑 Authorization header token present: ${!!token}`)
+    // Enhanced token extraction and validation with multiple sources
+    logWithTimestamp('INFO', `Starting token extraction [${requestId}]`);
     
-    if (token) {
-      console.log(`🔑 Token from header - Length: ${token.length}, Preview: ${token.substring(0, 30)}...${token.substring(token.length - 10)}`)
+    let token = null;
+    let tokenSource = 'none';
+
+    // Method 1: Authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (authHeader) {
+      logWithTimestamp('INFO', `Authorization header found [${requestId}]: ${authHeader.substring(0, 20)}...`);
+      if (authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+        tokenSource = 'auth_header';
+        logWithTimestamp('SUCCESS', `Token extracted from Authorization header [${requestId}]: ${token.substring(0, 20)}...${token.substring(token.length - 10)} (${token.length} chars)`);
+      } else {
+        logWithTimestamp('WARN', `Authorization header doesn't start with 'Bearer ' [${requestId}]`);
+      }
+    } else {
+      logWithTimestamp('WARN', `No Authorization header found [${requestId}]`);
     }
     
+    // Method 2: Request body access_token
     if (!token && requestBody.access_token) {
-      console.log(`🔄 No Authorization header, extracting token from request body`)
-      token = requestBody.access_token
-      console.log(`🔑 Token from body - Length: ${token.length}, Preview: ${token.substring(0, 30)}...${token.substring(token.length - 10)}`)
+      token = requestBody.access_token;
+      tokenSource = 'request_body';
+      logWithTimestamp('SUCCESS', `Token extracted from request body [${requestId}]: ${token.substring(0, 20)}...${token.substring(token.length - 10)} (${token.length} chars)`);
+    }
+
+    // Method 3: Direct token field
+    if (!token && requestBody.token) {
+      token = requestBody.token;
+      tokenSource = 'body_token_field';
+      logWithTimestamp('SUCCESS', `Token extracted from body token field [${requestId}]: ${token.substring(0, 20)}...${token.substring(token.length - 10)} (${token.length} chars)`);
     }
 
     if (!token) {
-      console.error('❌ NO TOKEN FOUND - Missing in both header and body')
-      console.log('📋 Available request body keys:', Object.keys(requestBody || {}))
-      console.log('📋 Authorization header:', req.headers.get('Authorization'))
+      logWithTimestamp('ERROR', `NO TOKEN FOUND from any source [${requestId}]`, {
+        auth_header_present: !!authHeader,
+        body_access_token_present: !!requestBody.access_token,
+        body_token_present: !!requestBody.token,
+        body_keys: Object.keys(requestBody || {}),
+        headers_keys: Object.keys(requestHeaders)
+      });
       
       return new Response(
         JSON.stringify({ 
           error: 'Authorization required', 
           details: 'No token found in Authorization header or request body',
+          request_id: requestId,
           debug: {
-            hasAuthHeader: !!req.headers.get('Authorization'),
-            hasBodyToken: !!(requestBody?.access_token),
-            bodyKeys: Object.keys(requestBody || {})
+            checked_auth_header: !!authHeader,
+            checked_body_access_token: !!requestBody?.access_token,
+            checked_body_token: !!requestBody?.token,
+            available_body_keys: Object.keys(requestBody || {}),
+            available_header_keys: Object.keys(requestHeaders)
           }
         }),
         { 
@@ -85,33 +154,50 @@ serve(async (req) => {
       )
     }
 
-    console.log(`🔐 Using token for authentication: ${token.substring(0, 20)}...`)
+    logWithTimestamp('SUCCESS', `Token validated from ${tokenSource} [${requestId}]`, {
+      source: tokenSource,
+      length: token.length,
+      preview: token.substring(0, 30) + '...',
+      suffix: '...' + token.substring(token.length - 10)
+    });
 
     // Enhanced user authentication with detailed logging
-    console.log(`👤 Attempting to authenticate user with token...`)
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token)
+    logWithTimestamp('INFO', `Attempting user authentication [${requestId}]`);
+    const authStartTime = performance.now();
     
-    console.log(`👤 Authentication result:`)
-    console.log(`  - User ID: ${user?.id || 'NONE'}`)
-    console.log(`  - User Email: ${user?.email || 'NONE'}`)
-    console.log(`  - User Provider: ${user?.app_metadata?.provider || 'NONE'}`)
-    console.log(`  - User Created: ${user?.created_at || 'NONE'}`)
-    console.log(`  - Auth Error: ${userError?.message || 'NONE'}`)
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+    const authEndTime = performance.now();
+    
+    logWithTimestamp('INFO', `Authentication completed in ${Math.round(authEndTime - authStartTime)}ms [${requestId}]`, {
+      has_user: !!user,
+      has_error: !!userError,
+      user_id: user?.id,
+      user_email: user?.email,
+      user_provider: user?.app_metadata?.provider,
+      error_message: userError?.message,
+      error_status: userError?.status
+    });
 
     if (userError || !user) {
-      console.error(`❌ Authentication failed:`)
-      console.error(`  - Error Message: ${userError?.message}`)
-      console.error(`  - Error Code: ${userError?.status}`)
-      console.error(`  - User Object: ${user}`)
+      logWithTimestamp('ERROR', `Authentication failed [${requestId}]:`, {
+        error_message: userError?.message,
+        error_code: userError?.status,
+        token_length: token.length,
+        token_preview: token.substring(0, 20) + '...',
+        token_source: tokenSource
+      });
       
       return new Response(
         JSON.stringify({ 
           error: 'Invalid authentication token',
           details: userError?.message || 'No user found',
+          request_id: requestId,
           debug: {
-            tokenLength: token.length,
-            tokenPreview: token.substring(0, 20) + '...',
-            errorCode: userError?.status
+            token_length: token.length,
+            token_preview: token.substring(0, 20) + '...',
+            token_source: tokenSource,
+            error_code: userError?.status,
+            supabase_error: userError?.message
           }
         }),
         { 
@@ -121,29 +207,40 @@ serve(async (req) => {
       )
     }
 
-    console.log(`✅ User authenticated successfully: ${user.email}`)
-    console.log(`📊 User metadata:`, JSON.stringify(user.app_metadata, null, 2))
+    logWithTimestamp('SUCCESS', `User authenticated successfully [${requestId}]`, {
+      user_id: user.id,
+      user_email: user.email,
+      provider: user.app_metadata?.provider,
+      created_at: user.created_at,
+      last_sign_in: user.last_sign_in_at
+    });
 
     // Enhanced Google OAuth validation
-    const isGoogleUser = user.app_metadata?.provider === 'google'
-    console.log(`🔍 Google OAuth check:`)
-    console.log(`  - Is Google User: ${isGoogleUser}`)
-    console.log(`  - Provider: ${user.app_metadata?.provider}`)
-    console.log(`  - All Providers: ${JSON.stringify(user.app_metadata?.providers || [])}`)
+    const isGoogleUser = user.app_metadata?.provider === 'google';
+    logWithTimestamp('INFO', `Google OAuth validation [${requestId}]:`, {
+      is_google_user: isGoogleUser,
+      provider: user.app_metadata?.provider,
+      all_providers: user.app_metadata?.providers || [],
+      has_app_metadata: !!user.app_metadata
+    });
     
     if (!isGoogleUser) {
-      console.error(`❌ User is not authenticated via Google`)
-      console.error(`  - Current Provider: ${user.app_metadata?.provider}`)
-      console.error(`  - Required Provider: google`)
+      logWithTimestamp('ERROR', `Non-Google user attempted access [${requestId}]:`, {
+        current_provider: user.app_metadata?.provider,
+        required_provider: 'google',
+        user_id: user.id,
+        user_email: user.email
+      });
       
       return new Response(
         JSON.stringify({ 
           error: 'Google OAuth required. Please sign in with Google to access Gmail and Drive.',
           requiresGoogleAuth: true,
+          request_id: requestId,
           debug: {
-            currentProvider: user.app_metadata?.provider,
-            userId: user.id,
-            userEmail: user.email
+            current_provider: user.app_metadata?.provider,
+            user_id: user.id,
+            user_email: user.email
           }
         }),
         { 
@@ -153,34 +250,38 @@ serve(async (req) => {
       )
     }
 
-    // Provider token validation and setup
-    const providerToken = token // Using access token as provider token
-    console.log(`🔐 Provider token setup:`)
-    console.log(`  - Using access token as provider token`)
-    console.log(`  - Token length: ${providerToken.length}`)
-    console.log(`  - Token preview: ${providerToken.substring(0, 30)}...`)
+    // Provider token setup and validation
+    const providerToken = token; // Using access token as provider token
+    logWithTimestamp('SUCCESS', `Provider token setup completed [${requestId}]:`, {
+      using_access_token_as_provider: true,
+      token_length: providerToken.length,
+      token_preview: providerToken.substring(0, 30) + '...'
+    });
 
-    console.log(`✅ Google user verified, proceeding with request processing`)
+    // Parse and validate request details
+    const { action, flowId } = requestBody;
+    logWithTimestamp('INFO', `Request details parsed [${requestId}]:`, {
+      action: action,
+      flow_id: flowId,
+      has_debug_info: !!requestBody.debug_info,
+      debug_keys: requestBody.debug_info ? Object.keys(requestBody.debug_info) : []
+    });
 
-    // Parse request details
-    const { action, flowId } = requestBody
-    console.log(`📋 Request details:`)
-    console.log(`  - Action: ${action}`)
-    console.log(`  - Flow ID: ${flowId}`)
-    console.log(`  - Debug Info: ${JSON.stringify(requestBody.debug_info || {})}`)
-
-    // Get the Apps Script Web App URL
-    const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL')
-    console.log(`🔗 Apps Script URL check:`)
-    console.log(`  - URL Present: ${!!appsScriptUrl}`)
-    console.log(`  - URL: ${appsScriptUrl || 'NOT SET'}`)
+    // Get and validate Apps Script URL
+    const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL');
+    logWithTimestamp('INFO', `Apps Script URL validation [${requestId}]:`, {
+      url_present: !!appsScriptUrl,
+      url_length: appsScriptUrl?.length,
+      url_preview: appsScriptUrl ? appsScriptUrl.substring(0, 50) + '...' : 'NOT SET'
+    });
     
     if (!appsScriptUrl) {
-      console.error(`❌ APPS_SCRIPT_WEB_APP_URL environment variable not configured`)
+      logWithTimestamp('ERROR', `Apps Script URL not configured [${requestId}]`);
       return new Response(
         JSON.stringify({ 
           error: 'Apps Script URL not configured',
-          details: 'APPS_SCRIPT_WEB_APP_URL environment variable is missing'
+          details: 'APPS_SCRIPT_WEB_APP_URL environment variable is missing',
+          request_id: requestId
         }),
         { 
           status: 500, 
@@ -190,10 +291,12 @@ serve(async (req) => {
     }
 
     if (action === 'run_flow') {
-      console.log(`🏃‍♂️ Processing run_flow action for flow ID: ${flowId}`)
+      logWithTimestamp('INFO', `Processing run_flow action [${requestId}] for flow: ${flowId}`);
       
-      // Get flow configuration from database with enhanced logging
-      console.log(`📊 Fetching flow configuration from database...`)
+      // Get flow configuration from database
+      logWithTimestamp('INFO', `Fetching flow configuration from database [${requestId}]`);
+      const dbQueryStart = performance.now();
+      
       const { data: flowConfig, error: flowError } = await supabaseClient
         .from('user_configurations')
         .select('*')
@@ -201,31 +304,42 @@ serve(async (req) => {
         .eq('user_id', user.id)
         .single()
 
-      console.log(`📊 Database query result:`)
-      console.log(`  - Flow found: ${!!flowConfig}`)
-      console.log(`  - Query error: ${flowError?.message || 'NONE'}`)
-      
+      const dbQueryEnd = performance.now();
+      logWithTimestamp('INFO', `Database query completed in ${Math.round(dbQueryEnd - dbQueryStart)}ms [${requestId}]`, {
+        flow_found: !!flowConfig,
+        has_error: !!flowError,
+        error_message: flowError?.message
+      });
+
       if (flowConfig) {
-        console.log(`  - Flow name: ${flowConfig.flow_name}`)
-        console.log(`  - Email filter: ${flowConfig.email_filter}`)
-        console.log(`  - Drive folder: ${flowConfig.drive_folder}`)
-        console.log(`  - File types: ${JSON.stringify(flowConfig.file_types)}`)
+        logWithTimestamp('SUCCESS', `Flow configuration retrieved [${requestId}]:`, {
+          flow_id: flowConfig.id,
+          flow_name: flowConfig.flow_name,
+          email_filter: flowConfig.email_filter,
+          drive_folder: flowConfig.drive_folder,
+          file_types: flowConfig.file_types || [],
+          auto_run: flowConfig.auto_run,
+          created_at: flowConfig.created_at
+        });
       }
 
       if (flowError || !flowConfig) {
-        console.error(`❌ Flow configuration error:`)
-        console.error(`  - Error: ${flowError?.message}`)
-        console.error(`  - Flow ID: ${flowId}`)
-        console.error(`  - User ID: ${user.id}`)
+        logWithTimestamp('ERROR', `Flow configuration error [${requestId}]:`, {
+          error: flowError?.message,
+          flow_id: flowId,
+          user_id: user.id,
+          query_error: flowError?.message
+        });
         
         return new Response(
           JSON.stringify({ 
             error: 'Flow not found or access denied',
             details: flowError?.message || 'Flow not found',
+            request_id: requestId,
             debug: {
-              flowId: flowId,
-              userId: user.id,
-              queryError: flowError?.message
+              flow_id: flowId,
+              user_id: user.id,
+              query_error: flowError?.message
             }
           }),
           { 
@@ -235,9 +349,7 @@ serve(async (req) => {
         )
       }
 
-      console.log(`✅ Flow configuration retrieved: ${flowConfig.flow_name}`)
-
-      // Prepare enhanced payload for Apps Script
+      // Prepare comprehensive payload for Apps Script
       const payload = {
         action: 'run_flow',
         user_id: user.id,
@@ -249,53 +361,75 @@ serve(async (req) => {
           file_types: flowConfig.file_types || []
         },
         debug_info: {
+          request_id: requestId,
           request_timestamp: new Date().toISOString(),
           user_email: user.email,
           provider: user.app_metadata?.provider,
-          fallback_attempt: requestBody.fallback_attempt || false,
-          edge_function_version: '2.0-enhanced-logging'
+          token_source: tokenSource,
+          token_length: providerToken.length,
+          edge_function_version: '3.0-enhanced-debug',
+          flow_id: flowConfig.id,
+          user_agent: req.headers.get('X-User-Agent') || 'unknown',
+          debug_source: req.headers.get('X-Debug-Source') || 'unknown',
+          original_debug_info: requestBody.debug_info || {}
         }
-      }
+      };
 
-      console.log(`📤 Calling Apps Script with enhanced payload:`)
-      console.log(`  - Action: ${payload.action}`)
-      console.log(`  - User ID: ${payload.user_id}`)
-      console.log(`  - Flow Name: ${payload.flow_config.flow_name}`)
-      console.log(`  - Email Filter: ${payload.flow_config.email_filter}`)
-      console.log(`  - Drive Folder: ${payload.flow_config.drive_folder}`)
-      console.log(`  - File Types: ${JSON.stringify(payload.flow_config.file_types)}`)
-      console.log(`  - Token Present: ${!!payload.access_token}`)
-      console.log(`  - Token Length: ${payload.access_token.length}`)
-      console.log(`  - Apps Script URL: ${appsScriptUrl}`)
-      console.log(`  - Debug Info: ${JSON.stringify(payload.debug_info)}`)
+      logWithTimestamp('INFO', `Prepared Apps Script payload [${requestId}]:`, {
+        action: payload.action,
+        user_id: payload.user_id,
+        flow_name: payload.flow_config.flow_name,
+        token_present: !!payload.access_token,
+        token_length: payload.access_token.length,
+        debug_keys: Object.keys(payload.debug_info)
+      });
 
-      // Call Apps Script with comprehensive error handling
+      // Call Apps Script with comprehensive error handling and logging
+      logWithTimestamp('INFO', `Calling Apps Script API [${requestId}]`);
       let appsScriptResponse;
+      
       try {
-        console.log(`🌐 Making HTTP request to Apps Script...`)
+        const appsScriptStart = performance.now();
+        
         appsScriptResponse = await fetch(appsScriptUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-Request-ID': requestId,
+            'X-User-ID': user.id,
+            'X-Flow-ID': flowId
           },
           body: JSON.stringify(payload)
-        })
+        });
 
-        console.log(`📡 Apps Script HTTP response:`)
-        console.log(`  - Status: ${appsScriptResponse.status}`)
-        console.log(`  - Status Text: ${appsScriptResponse.statusText}`)
-        console.log(`  - Headers: ${JSON.stringify(Object.fromEntries(appsScriptResponse.headers.entries()))}`)
-        console.log(`  - OK: ${appsScriptResponse.ok}`)
+        const appsScriptEnd = performance.now();
+        const responseTime = Math.round(appsScriptEnd - appsScriptStart);
+        
+        logWithTimestamp('INFO', `Apps Script HTTP response received [${requestId}]:`, {
+          status: appsScriptResponse.status,
+          status_text: appsScriptResponse.statusText,
+          ok: appsScriptResponse.ok,
+          response_time_ms: responseTime,
+          headers: Object.fromEntries(appsScriptResponse.headers.entries())
+        });
 
       } catch (fetchError) {
-        console.error(`❌ Failed to call Apps Script:`, fetchError)
+        logWithTimestamp('ERROR', `Apps Script fetch failed [${requestId}]:`, {
+          error_name: fetchError.name,
+          error_message: fetchError.message,
+          error_stack: fetchError.stack?.substring(0, 300),
+          apps_script_url: appsScriptUrl
+        });
+        
         return new Response(
           JSON.stringify({ 
             error: 'Failed to call Apps Script',
             details: fetchError.message,
+            request_id: requestId,
             debug: {
-              appsScriptUrl: appsScriptUrl,
-              fetchError: fetchError.toString()
+              apps_script_url: appsScriptUrl,
+              fetch_error: fetchError.toString(),
+              error_type: fetchError.constructor.name
             }
           }),
           { 
@@ -305,28 +439,35 @@ serve(async (req) => {
         )
       }
 
+      // Handle non-OK responses with detailed logging
       if (!appsScriptResponse.ok) {
         let errorText;
         try {
-          errorText = await appsScriptResponse.text()
-          console.error(`❌ Apps Script error response:`)
-          console.error(`  - Status: ${appsScriptResponse.status}`)
-          console.error(`  - Error Text: ${errorText}`)
+          errorText = await appsScriptResponse.text();
+          logWithTimestamp('ERROR', `Apps Script error response [${requestId}]:`, {
+            status: appsScriptResponse.status,
+            status_text: appsScriptResponse.statusText,
+            error_text: errorText,
+            error_text_length: errorText.length
+          });
         } catch (textError) {
-          console.error(`❌ Failed to read Apps Script error response:`, textError)
-          errorText = 'Unable to read error response'
+          logWithTimestamp('ERROR', `Failed to read Apps Script error response [${requestId}]:`, {
+            text_error: textError.message
+          });
+          errorText = 'Unable to read error response';
         }
         
-        // Enhanced error categorization
+        // Enhanced error categorization with detailed logging
         if (appsScriptResponse.status === 401) {
-          console.error(`🔐 Authentication error with Google APIs`)
+          logWithTimestamp('ERROR', `Apps Script authentication error [${requestId}]`);
           return new Response(
             JSON.stringify({ 
               error: 'Google authentication expired. Please sign in with Google again.',
               requiresReauth: true,
+              request_id: requestId,
               debug: {
-                appsScriptStatus: appsScriptResponse.status,
-                errorText: errorText
+                apps_script_status: appsScriptResponse.status,
+                error_text: errorText
               }
             }),
             { 
@@ -337,14 +478,15 @@ serve(async (req) => {
         }
 
         if (appsScriptResponse.status === 403) {
-          console.error(`🚫 Permission error with Google APIs`)
+          logWithTimestamp('ERROR', `Apps Script permission error [${requestId}]`);
           return new Response(
             JSON.stringify({ 
               error: 'Google API access denied. Please ensure you grant Gmail and Drive permissions.',
               requiresPermissions: true,
+              request_id: requestId,
               debug: {
-                appsScriptStatus: appsScriptResponse.status,
-                errorText: errorText
+                apps_script_status: appsScriptResponse.status,
+                error_text: errorText
               }
             }),
             { 
@@ -354,14 +496,20 @@ serve(async (req) => {
           )
         }
 
-        console.error(`💥 Generic Apps Script error`)
+        logWithTimestamp('ERROR', `Generic Apps Script error [${requestId}]:`, {
+          status: appsScriptResponse.status,
+          status_text: appsScriptResponse.statusText,
+          error_text: errorText
+        });
+        
         return new Response(
           JSON.stringify({ 
             error: `Apps Script error: ${errorText}`,
+            request_id: requestId,
             debug: {
               status: appsScriptResponse.status,
-              statusText: appsScriptResponse.statusText,
-              errorText: errorText
+              status_text: appsScriptResponse.statusText,
+              error_text: errorText
             }
           }),
           { 
@@ -371,22 +519,37 @@ serve(async (req) => {
         )
       }
 
-      // Parse successful response
+      // Parse successful response with enhanced logging
       let result;
       try {
-        result = await appsScriptResponse.json()
-        console.log(`✅ Apps Script success response:`)
-        console.log(`  - Response: ${JSON.stringify(result, null, 2)}`)
+        const responseText = await appsScriptResponse.text();
+        logWithTimestamp('INFO', `Apps Script response text [${requestId}]:`, {
+          text_length: responseText.length,
+          text_preview: responseText.substring(0, 200) + (responseText.length > 200 ? '...' : '')
+        });
+        
+        result = JSON.parse(responseText);
+        logWithTimestamp('SUCCESS', `Apps Script response parsed successfully [${requestId}]:`, {
+          result_keys: Object.keys(result),
+          result_preview: JSON.stringify(result).substring(0, 300) + '...'
+        });
       } catch (jsonError) {
-        console.error(`❌ Failed to parse Apps Script success response:`, jsonError)
-        const textResponse = await appsScriptResponse.text()
-        console.error(`📄 Raw response text: ${textResponse}`)
+        logWithTimestamp('ERROR', `Failed to parse Apps Script success response [${requestId}]:`, {
+          json_error: jsonError.message,
+          json_error_type: jsonError.constructor.name
+        });
+        
+        const textResponse = await appsScriptResponse.text();
+        logWithTimestamp('ERROR', `Raw response text [${requestId}]:`, {
+          raw_text: textResponse
+        });
         
         return new Response(
           JSON.stringify({ 
             error: 'Invalid JSON response from Apps Script',
             details: jsonError.message,
-            rawResponse: textResponse
+            request_id: requestId,
+            raw_response: textResponse
           }),
           { 
             status: 500, 
@@ -395,9 +558,13 @@ serve(async (req) => {
         )
       }
 
-      console.log(`🎉 Flow execution completed successfully!`)
+      logWithTimestamp('SUCCESS', `Flow execution completed successfully [${requestId}]!`);
       return new Response(
-        JSON.stringify(result),
+        JSON.stringify({
+          ...result,
+          request_id: requestId,
+          processing_time: new Date().toISOString()
+        }),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -407,16 +574,17 @@ serve(async (req) => {
 
     // Handle other actions (like set_flow)
     if (action === 'set_flow') {
-      console.log(`⚙️ Processing set_flow action for user: ${user.email}`)
+      logWithTimestamp('INFO', `Processing set_flow action [${requestId}] for user: ${user.email}`);
       
       const response = { 
         success: true, 
         message: 'Flow setup confirmed',
         user_id: user.id,
+        request_id: requestId,
         timestamp: new Date().toISOString()
       }
       
-      console.log(`✅ Flow setup response: ${JSON.stringify(response)}`)
+      logWithTimestamp('SUCCESS', `Flow setup completed [${requestId}]:`, response);
       
       return new Response(
         JSON.stringify(response),
@@ -427,12 +595,17 @@ serve(async (req) => {
       )
     }
 
-    console.error(`❌ Unknown action received: ${action}`)
+    logWithTimestamp('ERROR', `Unknown action received [${requestId}]:`, {
+      received_action: action,
+      supported_actions: ['run_flow', 'set_flow']
+    });
+    
     return new Response(
       JSON.stringify({ 
         error: 'Unknown action',
-        receivedAction: action,
-        supportedActions: ['run_flow', 'set_flow']
+        received_action: action,
+        supported_actions: ['run_flow', 'set_flow'],
+        request_id: requestId
       }),
       { 
         status: 400, 
@@ -441,19 +614,22 @@ serve(async (req) => {
     )
 
   } catch (error) {
-    console.error('💥 === UNEXPECTED ERROR IN EDGE FUNCTION ===')
-    console.error('Error name:', error.name)
-    console.error('Error message:', error.message)
-    console.error('Error stack:', error.stack)
-    console.error('Error toString:', error.toString())
+    logWithTimestamp('ERROR', `=== UNEXPECTED ERROR IN EDGE FUNCTION [${requestId}] ===`, {
+      error_name: error.name,
+      error_message: error.message,
+      error_stack: error.stack,
+      error_constructor: error.constructor.name,
+      error_toString: error.toString()
+    });
     
     return new Response(
       JSON.stringify({ 
         error: 'Internal server error',
         details: error.message,
+        request_id: requestId,
         debug: {
-          errorName: error.name,
-          errorMessage: error.message,
+          error_name: error.name,
+          error_message: error.message,
           timestamp: new Date().toISOString()
         }
       }),
@@ -462,5 +638,7 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
     )
+  } finally {
+    logWithTimestamp('INFO', `=== REQUEST END [${requestId}] ===`);
   }
 })
