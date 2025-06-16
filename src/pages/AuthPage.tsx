@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Zap, Mail, Lock, User, AlertCircle, Shield, Database } from 'lucide-react';
+import { Zap, Mail, Lock, User, AlertCircle, Shield, Database, CheckCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
@@ -19,14 +19,27 @@ const AuthPage = () => {
   const [fullName, setFullName] = useState('');
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authError, signInWithGoogle, isGoogleConnected, loading } = useAuth();
 
   // Redirect if already authenticated
   useEffect(() => {
-    if (user) {
+    if (user && isGoogleConnected) {
+      console.log('[AUTH PAGE] User authenticated with Google, redirecting...');
       navigate('/app');
     }
-  }, [user, navigate]);
+  }, [user, isGoogleConnected, navigate]);
+
+  // Show loading state during auth initialization
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 bg-blue-600 rounded-full animate-pulse mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,6 +105,10 @@ const AuthPage = () => {
           variant: "destructive"
         });
       } else {
+        toast({
+          title: "✅ Signed in successfully",
+          description: "Note: You'll still need to connect with Google for full functionality.",
+        });
         navigate('/app');
       }
     } catch (error) {
@@ -107,29 +124,10 @@ const AuthPage = () => {
 
   const handleGoogleAuth = async () => {
     setIsLoading(true);
-    
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/app`,
-          scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file'
-        }
-      });
-
-      if (error) {
-        toast({
-          title: "Authentication failed",
-          description: error.message,
-          variant: "destructive"
-        });
-      }
+      await signInWithGoogle();
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
-      });
+      console.error('[AUTH PAGE] Google auth error:', error);
     } finally {
       setIsLoading(false);
     }
@@ -160,7 +158,43 @@ const AuthPage = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Google Authentication - Now prominently featured */}
+            {/* Show auth errors */}
+            {authError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {authError}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Show Google connection status for existing users */}
+            {user && (
+              <Alert variant={isGoogleConnected ? "default" : "destructive"}>
+                {isGoogleConnected ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                <AlertDescription>
+                  {isGoogleConnected ? (
+                    <div className="flex items-center justify-between">
+                      <span>✅ Connected to Google - Gmail and Drive access enabled</span>
+                      <Button 
+                        onClick={() => navigate('/app')} 
+                        size="sm" 
+                        className="ml-2"
+                      >
+                        Go to App
+                      </Button>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="font-medium">Google authentication required</p>
+                      <p className="text-sm">You need to connect with Google to access Gmail and Drive features.</p>
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Google Authentication - Primary method */}
             <div className="space-y-4">
               <Alert>
                 <Shield className="h-4 w-4" />
@@ -193,7 +227,7 @@ const AuthPage = () => {
                   <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                   <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
-                {isLoading ? "Connecting..." : "Continue with Google (Recommended)"}
+                {isLoading ? "Connecting..." : (user && !isGoogleConnected ? "Connect Google Account" : "Continue with Google (Recommended)")}
               </Button>
             </div>
 
