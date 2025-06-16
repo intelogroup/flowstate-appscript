@@ -104,11 +104,30 @@ export class FlowService {
       const result = await response.json();
       console.log('[FLOW SERVICE] Response received:', result);
 
-      return {
-        success: result.status === 'success',
-        data: result.data,
-        error: result.status === 'error' ? result.message : undefined
-      };
+      // Handle the nested apps_script_response structure
+      const appsScriptData = result.apps_script_response || result;
+      
+      // Check if the Apps Script execution was successful
+      if (appsScriptData.status === 'success') {
+        return {
+          success: true,
+          data: appsScriptData.data,
+          error: undefined
+        };
+      } else if (appsScriptData.status === 'error') {
+        return {
+          success: false,
+          data: undefined,
+          error: appsScriptData.message || 'Apps Script execution failed'
+        };
+      } else {
+        // Handle edge function success but unknown Apps Script status
+        return {
+          success: false,
+          data: undefined,
+          error: appsScriptData.message || 'Unknown Apps Script status'
+        };
+      }
 
     } catch (error) {
       console.error('[FLOW SERVICE] Flow execution failed:', error);
