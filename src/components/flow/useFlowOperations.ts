@@ -66,7 +66,7 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Payload preparation
+      // Step 4: Payload preparation with enhanced validation
       addDebugInfo("📋 Step 4: Payload preparation");
       const basePayload = {
         action: 'run_flow',
@@ -82,14 +82,30 @@ export const useFlowOperations = (
           flow_name: flow.flow_name,
           has_provider_token: !!session.provider_token,
           session_expires: session.expires_at,
-          attempt_number: 1
+          attempt_number: 1,
+          client_version: '2.0-enhanced'
         }
       };
+
+      // Validate payload before sending
+      if (!basePayload.action || !basePayload.flowId || !basePayload.access_token) {
+        const errorMsg = "Invalid payload - missing required fields";
+        addDebugInfo(`❌ ${errorMsg}`, true);
+        addDebugInfo(`  - Action: ${!!basePayload.action}`, true);
+        addDebugInfo(`  - FlowId: ${!!basePayload.flowId}`, true);
+        addDebugInfo(`  - Access Token: ${!!basePayload.access_token}`, true);
+        toast({
+          title: "🔴 Payload Error",
+          description: errorMsg,
+          variant: "destructive"
+        });
+        return;
+      }
 
       addDebugInfo(`📦 Payload prepared with ${Object.keys(basePayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
 
-      // Step 5: Primary method attempt
+      // Step 5: Primary method attempt with enhanced error handling
       addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke");
       let response;
       let attemptMethod = "primary";
@@ -104,7 +120,9 @@ export const useFlowOperations = (
             'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json',
             'X-Debug-Source': 'flowmanager-primary',
-            'X-User-Agent': 'FlowState-WebApp/1.0'
+            'X-User-Agent': 'FlowState-WebApp/2.0',
+            'X-Flow-ID': flow.id,
+            'X-Request-Source': 'web-client'
           }
         });
         const invokeEndTime = performance.now();
@@ -117,6 +135,8 @@ export const useFlowOperations = (
           addDebugInfo(`  - Error: ${JSON.stringify(response.error)}`, true);
           addDebugInfo(`  - Error type: ${typeof response.error}`, true);
           addDebugInfo(`  - Error message: ${response.error.message || 'No message'}`, true);
+          addDebugInfo(`  - Error name: ${response.error.name || 'Unknown'}`, true);
+          addDebugInfo(`  - Error context: ${JSON.stringify(response.error.context || {})}`, true);
         } else {
           addDebugInfo(`✅ Primary method success data:`);
           addDebugInfo(`  - Data keys: ${response.data ? Object.keys(response.data).join(', ') : 'No data'}`);
@@ -128,7 +148,7 @@ export const useFlowOperations = (
         addDebugInfo(`  - Error message: ${invokeError.message}`, true);
         addDebugInfo(`  - Error stack: ${invokeError.stack?.substring(0, 200)}...`, true);
         
-        // Step 6: Fallback method
+        // Step 6: Fallback method with better error details
         addDebugInfo("📋 Step 6: Fallback method - direct fetch");
         attemptMethod = "fallback";
         
@@ -143,7 +163,9 @@ export const useFlowOperations = (
               fallback_attempt: true,
               primary_error: invokeError.message,
               method: 'direct_fetch',
-              attempt_number: 2
+              attempt_number: 2,
+              primary_error_name: invokeError.name,
+              primary_error_stack: invokeError.stack?.substring(0, 100)
             }
           };
 
@@ -157,7 +179,9 @@ export const useFlowOperations = (
               'Content-Type': 'application/json',
               'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
               'X-Debug-Source': 'flowmanager-fallback',
-              'X-User-Agent': 'FlowState-WebApp/1.0'
+              'X-User-Agent': 'FlowState-WebApp/2.0',
+              'X-Flow-ID': flow.id,
+              'X-Request-Source': 'web-client-fallback'
             },
             body: JSON.stringify(fallbackPayload)
           });
@@ -172,6 +196,7 @@ export const useFlowOperations = (
           let responseData;
           const responseText = await fetchResponse.text();
           addDebugInfo(`📄 Raw response length: ${responseText.length} chars`);
+          addDebugInfo(`📄 Raw response preview: ${responseText.substring(0, 200)}${responseText.length > 200 ? '...' : ''}`);
           
           try {
             responseData = JSON.parse(responseText);
@@ -187,7 +212,13 @@ export const useFlowOperations = (
             error: fetchResponse.ok ? null : { 
               message: responseData.error || `HTTP ${fetchResponse.status}: ${fetchResponse.statusText}`,
               status: fetchResponse.status,
-              details: responseData
+              details: responseData,
+              name: 'HTTPError',
+              context: {
+                status: fetchResponse.status,
+                statusText: fetchResponse.statusText,
+                headers: responseHeaders
+              }
             }
           };
 
@@ -201,7 +232,7 @@ export const useFlowOperations = (
         }
       }
 
-      // Step 7: Response analysis
+      // Step 7: Response analysis with enhanced debugging
       addDebugInfo(`📋 Step 7: Response analysis (${attemptMethod} method)`);
       addDebugInfo(`🔍 Response structure analysis:`);
       addDebugInfo(`  - Has error: ${!!response.error}`);
@@ -212,14 +243,21 @@ export const useFlowOperations = (
         addDebugInfo(`❌ === ERROR ANALYSIS ===`, true);
         const errorMessage = response.error.message || 'Unknown error';
         const errorStatus = response.error.status || 'Unknown status';
+        const errorName = response.error.name || 'Unknown error type';
         
         addDebugInfo(`🔍 Error details:`, true);
+        addDebugInfo(`  - Name: "${errorName}"`, true);
         addDebugInfo(`  - Message: "${errorMessage}"`, true);
         addDebugInfo(`  - Status: ${errorStatus}`, true);
         addDebugInfo(`  - Full error: ${JSON.stringify(response.error)}`, true);
         
-        // Enhanced error categorization
-        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized') || errorMessage.includes('Invalid authentication token') || errorStatus === 401) {
+        // Enhanced error categorization with better matching
+        if (errorMessage.includes('401') || 
+            errorMessage.includes('Unauthorized') || 
+            errorMessage.includes('Invalid authentication token') || 
+            errorStatus === 401 ||
+            errorMessage.includes('authentication expired') ||
+            errorMessage.includes('auth')) {
           const authErrorMsg = "🔐 Google authentication has expired. Please sign in with Google again to refresh your permissions.";
           addDebugInfo(`🔐 Authentication error detected: ${authErrorMsg}`, true);
           setAuthError(authErrorMsg);
@@ -231,7 +269,11 @@ export const useFlowOperations = (
           return;
         }
         
-        if (errorMessage.includes('Google OAuth token not found') || errorMessage.includes('requiresGoogleAuth') || errorMessage.includes('Google OAuth required')) {
+        if (errorMessage.includes('Google OAuth token not found') || 
+            errorMessage.includes('requiresGoogleAuth') || 
+            errorMessage.includes('Google OAuth required') ||
+            errorMessage.includes('Google authentication') ||
+            errorMessage.includes('sign in with Google')) {
           const googleAuthMsg = "🔗 Google authentication is required. Please sign in with Google to access Gmail and Drive.";
           addDebugInfo(`🔗 Google OAuth error: ${googleAuthMsg}`, true);
           setAuthError(googleAuthMsg);
@@ -243,7 +285,12 @@ export const useFlowOperations = (
           return;
         }
 
-        if (errorMessage.includes('403') || errorMessage.includes('Forbidden') || errorMessage.includes('requiresPermissions') || errorStatus === 403) {
+        if (errorMessage.includes('403') || 
+            errorMessage.includes('Forbidden') || 
+            errorMessage.includes('requiresPermissions') || 
+            errorStatus === 403 ||
+            errorMessage.includes('permissions') ||
+            errorMessage.includes('access denied')) {
           const permissionMsg = "🚫 Google permissions denied. Please ensure you grant access to Gmail and Drive when signing in.";
           addDebugInfo(`🚫 Permission error: ${permissionMsg}`, true);
           setAuthError(permissionMsg);
@@ -255,8 +302,22 @@ export const useFlowOperations = (
           return;
         }
 
-        // Generic error handling
+        if (errorMessage.includes('Edge Function returned a non-2xx status code') ||
+            errorName === 'FunctionsHttpError') {
+          const serverErrorMsg = "🖥️ Server configuration issue detected. The Apps Script service may be unavailable or misconfigured.";
+          addDebugInfo(`🖥️ Server error: ${serverErrorMsg}`, true);
+          setAuthError(serverErrorMsg);
+          toast({
+            title: "🔴 Server Error",
+            description: serverErrorMsg,
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // Generic error handling with more details
         addDebugInfo(`💥 Unhandled error category: ${errorMessage}`, true);
+        addDebugInfo(`💥 Error context: ${JSON.stringify(response.error.context || {})}`, true);
         toast({
           title: "🔴 Flow Execution Failed",
           description: `Error: ${errorMessage}`,
@@ -273,6 +334,8 @@ export const useFlowOperations = (
       if (response.data) {
         addDebugInfo(`  - Data keys: ${Object.keys(response.data).join(', ')}`);
         addDebugInfo(`  - Data preview: ${JSON.stringify(response.data).substring(0, 200)}...`);
+        addDebugInfo(`  - Request ID: ${response.data.request_id || 'N/A'}`);
+        addDebugInfo(`  - Processing time: ${response.data.processing_time || 'N/A'}`);
       }
 
       toast({

@@ -44,9 +44,27 @@ serve(async (req) => {
       url_preview: supabaseUrl?.substring(0, 30) + '...'
     });
 
+    if (!supabaseUrl || !supabaseKey) {
+      logWithTimestamp('ERROR', `Missing Supabase configuration [${requestId}]`, {
+        supabase_url: !!supabaseUrl,
+        supabase_key: !!supabaseKey
+      });
+      return new Response(
+        JSON.stringify({ 
+          error: 'Server configuration error',
+          details: 'Missing Supabase configuration',
+          request_id: requestId
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
     const supabaseClient = createClient(
-      supabaseUrl ?? '',
-      supabaseKey ?? '',
+      supabaseUrl,
+      supabaseKey,
       {
         global: {
           headers: { Authorization: req.headers.get('Authorization')! },
@@ -61,7 +79,18 @@ serve(async (req) => {
       logWithTimestamp('INFO', `Raw request body length: ${bodyText.length} chars [${requestId}]`);
       
       if (!bodyText.trim()) {
-        throw new Error('Empty request body');
+        logWithTimestamp('ERROR', `Empty request body received [${requestId}]`);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Empty request body', 
+            details: 'Request body is required',
+            request_id: requestId
+          }),
+          { 
+            status: 400, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
       }
       
       requestBody = JSON.parse(bodyText);
@@ -267,6 +296,22 @@ serve(async (req) => {
       debug_keys: requestBody.debug_info ? Object.keys(requestBody.debug_info) : []
     });
 
+    // Validate required fields
+    if (!action) {
+      logWithTimestamp('ERROR', `Missing action field [${requestId}]`);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Missing action field',
+          details: 'Action is required in request body',
+          request_id: requestId
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
     // Get and validate Apps Script URL
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL');
     logWithTimestamp('INFO', `Apps Script URL validation [${requestId}]:`, {
@@ -292,6 +337,21 @@ serve(async (req) => {
 
     if (action === 'run_flow') {
       logWithTimestamp('INFO', `Processing run_flow action [${requestId}] for flow: ${flowId}`);
+      
+      if (!flowId) {
+        logWithTimestamp('ERROR', `Missing flowId for run_flow action [${requestId}]`);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Missing flowId',
+            details: 'flowId is required for run_flow action',
+            request_id: requestId
+          }),
+          { 
+            status: 400, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
       
       // Get flow configuration from database
       logWithTimestamp('INFO', `Fetching flow configuration from database [${requestId}]`);
@@ -367,7 +427,7 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: providerToken.length,
-          edge_function_version: '3.0-enhanced-debug',
+          edge_function_version: '4.0-enhanced-debug',
           flow_id: flowConfig.id,
           user_agent: req.headers.get('X-User-Agent') || 'unknown',
           debug_source: req.headers.get('X-Debug-Source') || 'unknown',
