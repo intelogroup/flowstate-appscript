@@ -15,28 +15,6 @@ interface UserFlow {
   created_at: string;
 }
 
-// Enhanced retry logic with exponential backoff
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const retryWithBackoff = async <T>(
-  operation: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelay: number = 1000
-): Promise<T> => {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt === maxRetries) throw error;
-      
-      const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
-      console.log(`Retry attempt ${attempt} failed, waiting ${delay}ms before retry`);
-      await sleep(delay);
-    }
-  }
-  throw new Error('Max retries exceeded');
-};
-
 export const useFlowOperations = (
   addDebugInfo: (message: string, isError?: boolean) => void,
   logSessionDetails: () => void
