@@ -13,7 +13,7 @@ import EmptyFlowsMessage from './flow/EmptyFlowsMessage';
 import FlowManagerHeader from './flow/FlowManagerHeader';
 import LoadingState from './flow/LoadingState';
 import PerformanceMonitor from './flow/PerformanceMonitor';
-import FlowCard from './flow/FlowCard';
+import FlowList from './flow/FlowList';
 
 const FlowManager = React.memo(() => {
   const { session } = useAuth();
@@ -79,25 +79,14 @@ const FlowManager = React.memo(() => {
           {!userFlows || userFlows.length === 0 ? (
             <EmptyFlowsMessage hasGoogleAuth={hasGoogleAuth} />
           ) : (
-            <div className="space-y-4">
-              {userFlows.map((flow) => {
-                const isRunning = runningFlows.has(flow.id);
-                const cooldownInfo = getCooldownInfo(flow.id);
-                
-                return (
-                  <FlowCard
-                    key={flow.id}
-                    flow={flow}
-                    isRunning={isRunning}
-                    hasGoogleAuth={hasGoogleAuth}
-                    isOnCooldown={cooldownInfo.isOnCooldown}
-                    cooldownDisplay={cooldownInfo.displayTime}
-                    onRun={handleRunFlow}
-                    onDelete={handleDeleteFlow}
-                  />
-                );
-              })}
-            </div>
+            <FlowList
+              flows={userFlows}
+              runningFlows={runningFlows}
+              hasGoogleAuth={hasGoogleAuth}
+              getCooldownInfo={getCooldownInfo}
+              onRun={handleRunFlow}
+              onDelete={handleDeleteFlow}
+            />
           )}
         </CardContent>
       </Card>
