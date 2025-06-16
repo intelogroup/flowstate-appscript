@@ -1,4 +1,5 @@
-import { useState } from 'react';
+
+import { useState, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router-dom';
+import React from 'react';
 
 interface UserFlow {
   id: string;
@@ -21,14 +23,14 @@ interface UserFlow {
   created_at: string;
 }
 
-const FlowManager = () => {
+const FlowManager = React.memo(() => {
   const [runningFlows, setRunningFlows] = useState<Set<string>>(new Set());
   const [authError, setAuthError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const { toast } = useToast();
   const { user, session } = useAuth();
 
-  const addDebugInfo = (message: string, isError: boolean = false) => {
+  const addDebugInfo = useCallback((message: string, isError: boolean = false) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
     
@@ -40,9 +42,9 @@ const FlowManager = () => {
       description: message,
       variant: isError ? "destructive" : "default"
     });
-  };
+  }, [toast]);
 
-  const logSessionDetails = () => {
+  const logSessionDetails = useCallback(() => {
     addDebugInfo("=== SESSION ANALYSIS START ===");
     
     if (!session) {
@@ -83,13 +85,13 @@ const FlowManager = () => {
     }
 
     addDebugInfo("=== SESSION ANALYSIS END ===");
-  };
+  }, [session, addDebugInfo]);
 
   // Fetch user's flows
   const { data: userFlows, isLoading, refetch } = useQuery({
     queryKey: ['user-flows', user?.id],
     queryFn: async () => {
-      addDebugInfo("📊 Starting database query for user flows");
+      console.log('[FLOW DEBUG] Starting database query for user flows');
       
       try {
         const { data, error } = await supabase
@@ -99,14 +101,14 @@ const FlowManager = () => {
           .order('created_at', { ascending: false });
 
         if (error) {
-          addDebugInfo(`❌ Database error: ${error.message}`, true);
+          console.error('[FLOW DEBUG] Database error:', error.message);
           throw error;
         }
 
-        addDebugInfo(`✅ Successfully fetched ${data?.length || 0} flows from database`);
+        console.log(`[FLOW DEBUG] Successfully fetched ${data?.length || 0} flows from database`);
         return data as UserFlow[];
       } catch (error) {
-        addDebugInfo(`💥 Database query failed: ${error}`, true);
+        console.error('[FLOW DEBUG] Database query failed:', error);
         throw error;
       }
     },
@@ -114,9 +116,12 @@ const FlowManager = () => {
   });
 
   // Check if user has Google authentication
-  const hasGoogleAuth = session?.provider_token || session?.access_token;
+  const hasGoogleAuth = useMemo(() => 
+    session?.provider_token || session?.access_token, 
+    [session?.provider_token, session?.access_token]
+  );
 
-  const runFlow = async (flow: UserFlow) => {
+  const runFlow = useCallback(async (flow: UserFlow) => {
     addDebugInfo(`🚀 === STARTING FLOW EXECUTION: ${flow.flow_name} ===`);
     setAuthError(null);
     setRunningFlows(prev => new Set(prev).add(flow.id));
@@ -397,13 +402,13 @@ const FlowManager = () => {
       setRunningFlows(prev => {
         const newSet = new Set(prev);
         newSet.delete(flow.id);
-        addDebugInfo(`🏁 Flow execution cleanup completed for: ${flow.flow_name}`);
+        console.log(`[FLOW DEBUG] Flow execution cleanup completed for: ${flow.flow_name}`);
         return newSet;
       });
     }
-  };
+  }, [session, addDebugInfo, logSessionDetails, toast]);
 
-  const deleteFlow = async (flowId: string) => {
+  const deleteFlow = useCallback(async (flowId: string) => {
     addDebugInfo(`🗑️ Starting flow deletion: ${flowId}`);
     
     try {
@@ -434,17 +439,17 @@ const FlowManager = () => {
         variant: "destructive"
       });
     }
-  };
+  }, [addDebugInfo, toast, user?.id, refetch]);
 
-  const clearDebugInfo = () => {
+  const clearDebugInfo = useCallback(() => {
     setDebugInfo([]);
     toast({
       title: "🧹 Debug Info Cleared",
       description: "Debug information has been cleared.",
     });
-  };
+  }, [toast]);
 
-  const exportDebugInfo = () => {
+  const exportDebugInfo = useCallback(() => {
     const debugText = debugInfo.join('\n');
     const blob = new Blob([debugText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -460,10 +465,9 @@ const FlowManager = () => {
       title: "📁 Debug Log Exported",
       description: "Debug information has been saved to a file.",
     });
-  };
+  }, [debugInfo, toast]);
 
   if (isLoading) {
-    addDebugInfo("⏳ Loading user flows...");
     return (
       <Card>
         <CardHeader>
@@ -674,6 +678,8 @@ const FlowManager = () => {
       </Card>
     </div>
   );
-};
+});
+
+FlowManager.displayName = 'FlowManager';
 
 export default FlowManager;
