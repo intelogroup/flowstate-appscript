@@ -155,21 +155,58 @@ serve(async (req) => {
       }, 400);
     }
 
-    // Create enhanced body for Google Apps Script
-    const bodyForGas = {
-      secret: appsScriptSecret,
-      payload: originalPayload,
-      debug_info: {
-        ...debugInfo,
-        supabase_timestamp: new Date().toISOString(),
-        auth_method: 'body-based-v2'
-      }
+    // FIXED: Create proper Apps Script payload format (no nesting)
+    let bodyForGas;
+    
+    if (originalPayload.action === 'run_flow') {
+      // Convert run_flow to the format Apps Script expects
+      bodyForGas = {
+        auth_token: appsScriptSecret,  // Apps Script expects this key name
+        action: 'process_gmail_flow',   // Apps Script expects this action
+        userConfig: originalPayload.userConfig || {
+          emailFilter: 'has:attachment',
+          driveFolder: 'Email Attachments',
+          fileTypes: [],
+          userId: 'unknown',
+          flowName: 'Default Flow'
+        },
+        googleTokens: originalPayload.googleTokens || null,
+        debug_info: {
+          ...debugInfo,
+          supabase_timestamp: new Date().toISOString(),
+          auth_method: 'body-based-v3'
+        }
+      };
+    } else if (originalPayload.action === 'set_flow') {
+      // Handle set_flow action
+      bodyForGas = {
+        auth_token: appsScriptSecret,
+        action: 'set_flow',
+        userConfig: originalPayload.userConfig,
+        debug_info: {
+          ...debugInfo,
+          supabase_timestamp: new Date().toISOString(),
+          auth_method: 'body-based-v3'
+        }
+      };
+    } else {
+      // Handle other actions - pass through with proper auth token
+      bodyForGas = {
+        auth_token: appsScriptSecret,
+        ...originalPayload,
+        debug_info: {
+          ...debugInfo,
+          supabase_timestamp: new Date().toISOString(),
+          auth_method: 'body-based-v3'
+        }
+      };
     }
 
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
-      action: originalPayload.action,
-      flowId: originalPayload.flowId,
+      action: bodyForGas.action,
+      hasAuthToken: !!bodyForGas.auth_token,
+      hasUserConfig: !!bodyForGas.userConfig,
       request_id: debugInfo.request_id,
       payload_size: JSON.stringify(bodyForGas).length
     });
@@ -184,7 +221,7 @@ serve(async (req) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Supabase-Edge-Function/2.0',
+          'User-Agent': 'Supabase-Edge-Function/3.0',
           'X-Request-ID': debugInfo.request_id
         },
         body: JSON.stringify(bodyForGas),
@@ -259,12 +296,12 @@ serve(async (req) => {
           ] : [
             '1. Check Apps Script logs for detailed error information',
             '2. Verify the secret token matches between Supabase and Apps Script',
-            '3. Ensure your Apps Script doPost function handles body-based auth'
+            '3. Ensure your Apps Script doPost function handles auth_token properly'
           ]
         },
         apps_script_url: appsScriptUrl,
         error_details: responseText.substring(0, 200),
-        auth_method: 'body-based-v2'
+        auth_method: 'body-based-v3'
       }, 502);
     }
 
@@ -278,6 +315,7 @@ serve(async (req) => {
         status: appsScriptData.status,
         message: appsScriptData.message,
         dataKeys: Object.keys(appsScriptData.data || {}),
+        attachments: appsScriptData.data?.attachments || 0,
         request_id: debugInfo.request_id
       });
     } catch (error) {
@@ -298,7 +336,7 @@ serve(async (req) => {
       message: 'Flow processed successfully',
       timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
-      auth_method: 'body-based-v2',
+      auth_method: 'body-based-v3',
       debug_info: debugInfo,
       apps_script_response: appsScriptData
     }, 200);
