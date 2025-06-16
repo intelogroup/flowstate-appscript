@@ -289,7 +289,18 @@ serve(async (req) => {
         JSON.stringify({ 
           error: 'Apps Script URL not configured',
           details: 'APPS_SCRIPT_WEB_APP_URL environment variable is missing',
-          request_id: requestId
+          request_id: requestId,
+          troubleshooting: {
+            message: 'Please check your Apps Script deployment URL',
+            steps: [
+              '1. Open your Google Apps Script project',
+              '2. Click Deploy > New Deployment',
+              '3. Choose Web app as the type',
+              '4. Set Execute as: "User accessing the web app"',
+              '5. Set Who has access to: "Anyone"',
+              '6. Copy the Web App URL to APPS_SCRIPT_WEB_APP_URL secret'
+            ]
+          }
         }),
         { 
           status: 500, 
@@ -347,16 +358,17 @@ serve(async (req) => {
         email_filter: flowConfig.email_filter
       });
 
-      // Prepare payload for Apps Script
+      // Prepare payload for Apps Script with enhanced format
       const payload = {
-        action: 'run_flow',
-        user_id: user.id,
-        access_token: token,
-        flow_config: {
-          flow_name: flowConfig.flow_name,
-          email_filter: flowConfig.email_filter,
-          drive_folder: flowConfig.drive_folder,
-          file_types: flowConfig.file_types || []
+        action: 'process_gmail_flow',
+        userConfig: {
+          flowName: flowConfig.flow_name,
+          emailFilter: flowConfig.email_filter,
+          driveFolder: flowConfig.drive_folder,
+          fileTypes: flowConfig.file_types || []
+        },
+        googleTokens: {
+          access_token: token
         },
         debug_info: {
           request_id: requestId,
@@ -365,7 +377,7 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '5.0-cors-fixed',
+          edge_function_version: '6.0-apps-script-format',
           flow_id: flowConfig.id,
           original_debug_info: requestBody.debug_info || {}
         }
@@ -373,13 +385,15 @@ serve(async (req) => {
 
       logWithTimestamp('INFO', `Prepared Apps Script payload [${requestId}]:`, {
         action: payload.action,
-        flow_name: payload.flow_config.flow_name,
-        payload_size: JSON.stringify(payload).length
+        flow_name: payload.userConfig.flowName,
+        payload_size: JSON.stringify(payload).length,
+        has_google_tokens: !!payload.googleTokens.access_token
       });
 
-      // Call Apps Script with enhanced error handling
+      // Call Apps Script with enhanced error handling and debugging
       try {
         logWithTimestamp('INFO', `Calling Apps Script API [${requestId}]`);
+        logWithTimestamp('INFO', `Apps Script URL: ${appsScriptUrl} [${requestId}]`);
         
         const appsScriptResponse = await fetch(appsScriptUrl, {
           method: 'POST',
@@ -387,7 +401,8 @@ serve(async (req) => {
             'Content-Type': 'application/json',
             'X-Request-ID': requestId,
             'X-User-ID': user.id,
-            'X-Flow-ID': flowId
+            'X-Flow-ID': flowId,
+            'User-Agent': 'FlowState-EdgeFunction/6.0'
           },
           body: JSON.stringify(payload)
         });
@@ -395,7 +410,8 @@ serve(async (req) => {
         logWithTimestamp('INFO', `Apps Script response [${requestId}]:`, {
           status: appsScriptResponse.status,
           ok: appsScriptResponse.ok,
-          statusText: appsScriptResponse.statusText
+          statusText: appsScriptResponse.statusText,
+          headers: Object.fromEntries(appsScriptResponse.headers.entries())
         });
 
         if (!appsScriptResponse.ok) {
@@ -403,14 +419,52 @@ serve(async (req) => {
           logWithTimestamp('ERROR', `Apps Script error [${requestId}]:`, {
             status: appsScriptResponse.status,
             statusText: appsScriptResponse.statusText,
-            error_text: errorText
+            error_text: errorText.substring(0, 500),
+            full_url: appsScriptUrl
           });
+
+          // Enhanced error analysis for common issues
+          let troubleshootingMessage = 'Apps Script execution failed';
+          let troubleshootingSteps = [];
+
+          if (appsScriptResponse.status === 401) {
+            troubleshootingMessage = 'Apps Script authentication failed - deployment configuration issue';
+            troubleshootingSteps = [
+              '1. Open your Google Apps Script project',
+              '2. Click Deploy > Manage Deployments',
+              '3. Click the edit icon (pencil) on your deployment',
+              '4. Set "Execute as" to "User accessing the web app"',
+              '5. Set "Who has access" to "Anyone"',
+              '6. Click "Deploy" to update the deployment',
+              '7. Copy the new Web App URL if it changed'
+            ];
+          } else if (appsScriptResponse.status === 404) {
+            troubleshootingMessage = 'Apps Script URL not found - check deployment URL';
+            troubleshootingSteps = [
+              '1. Verify the APPS_SCRIPT_WEB_APP_URL is correct',
+              '2. Check that your Apps Script is deployed as a Web App',
+              '3. Ensure the deployment is active and not disabled'
+            ];
+          } else if (appsScriptResponse.status === 403) {
+            troubleshootingMessage = 'Apps Script access denied - permission issue';
+            troubleshootingSteps = [
+              '1. Check deployment permissions in Apps Script',
+              '2. Verify "Who has access" is set to "Anyone"',
+              '3. Ensure the script has proper Gmail and Drive API permissions'
+            ];
+          }
           
           return new Response(
             JSON.stringify({ 
-              error: `Apps Script error (${appsScriptResponse.status}): ${errorText}`,
+              error: `Apps Script error (${appsScriptResponse.status}): ${troubleshootingMessage}`,
               request_id: requestId,
-              apps_script_status: appsScriptResponse.status
+              apps_script_status: appsScriptResponse.status,
+              troubleshooting: {
+                message: troubleshootingMessage,
+                steps: troubleshootingSteps,
+                apps_script_url: appsScriptUrl,
+                error_details: errorText.substring(0, 200)
+              }
             }),
             { 
               status: 502, 
@@ -421,14 +475,21 @@ serve(async (req) => {
 
         const result = await appsScriptResponse.json();
         logWithTimestamp('SUCCESS', `Apps Script success [${requestId}]`, {
-          result_keys: Object.keys(result || {})
+          result_keys: Object.keys(result || {}),
+          success: result.success,
+          message: result.message
         });
         
         return new Response(
           JSON.stringify({
             ...result,
             request_id: requestId,
-            processing_time: new Date().toISOString()
+            processing_time: new Date().toISOString(),
+            debug: {
+              apps_script_url: appsScriptUrl,
+              payload_sent: payload.action,
+              flow_name: payload.userConfig.flowName
+            }
           }),
           { 
             status: 200, 
@@ -440,7 +501,8 @@ serve(async (req) => {
         logWithTimestamp('ERROR', `Apps Script fetch failed [${requestId}]:`, {
           error: fetchError.message,
           error_name: fetchError.name,
-          error_stack: fetchError.stack
+          error_stack: fetchError.stack,
+          apps_script_url: appsScriptUrl
         });
         
         return new Response(
@@ -448,7 +510,17 @@ serve(async (req) => {
             error: 'Failed to call Apps Script',
             details: fetchError.message,
             error_type: fetchError.name,
-            request_id: requestId
+            request_id: requestId,
+            troubleshooting: {
+              message: 'Network error connecting to Apps Script',
+              steps: [
+                '1. Check that your Apps Script URL is correct',
+                '2. Verify your Apps Script is deployed and accessible',
+                '3. Test the Apps Script URL directly in a browser',
+                '4. Check Apps Script execution transcript for errors'
+              ],
+              apps_script_url: appsScriptUrl
+            }
           }),
           { 
             status: 502, 
