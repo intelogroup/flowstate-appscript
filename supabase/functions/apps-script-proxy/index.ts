@@ -276,10 +276,13 @@ serve(async (req) => {
       )
     }
 
-    // Get and validate Apps Script URL
+    // Get Apps Script configuration
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL');
-    logWithTimestamp('INFO', `Apps Script URL validation [${requestId}]:`, {
+    const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET');
+    
+    logWithTimestamp('INFO', `Apps Script configuration [${requestId}]:`, {
       url_present: !!appsScriptUrl,
+      secret_present: !!appsScriptSecret,
       url_preview: appsScriptUrl ? appsScriptUrl.substring(0, 50) + '...' : 'NOT SET'
     });
     
@@ -377,7 +380,7 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '6.0-apps-script-format',
+          edge_function_version: '7.0-with-secret-auth',
           flow_id: flowConfig.id,
           original_debug_info: requestBody.debug_info || {}
         }
@@ -390,6 +393,23 @@ serve(async (req) => {
         has_google_tokens: !!payload.googleTokens.access_token
       });
 
+      // Prepare headers for Apps Script call
+      const appsScriptHeaders = {
+        'Content-Type': 'application/json',
+        'X-Request-ID': requestId,
+        'X-User-ID': user.id,
+        'X-Flow-ID': flowId,
+        'User-Agent': 'FlowState-EdgeFunction/7.0'
+      };
+
+      // Add secret token to Authorization header if available
+      if (appsScriptSecret) {
+        appsScriptHeaders['Authorization'] = `Bearer ${appsScriptSecret}`;
+        logWithTimestamp('INFO', `Added secret token to Authorization header [${requestId}]`);
+      } else {
+        logWithTimestamp('WARN', `No Apps Script secret configured - proceeding without Authorization header [${requestId}]`);
+      }
+
       // Call Apps Script with enhanced error handling and debugging
       try {
         logWithTimestamp('INFO', `Calling Apps Script API [${requestId}]`);
@@ -397,13 +417,7 @@ serve(async (req) => {
         
         const appsScriptResponse = await fetch(appsScriptUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Request-ID': requestId,
-            'X-User-ID': user.id,
-            'X-Flow-ID': flowId,
-            'User-Agent': 'FlowState-EdgeFunction/6.0'
-          },
+          headers: appsScriptHeaders,
           body: JSON.stringify(payload)
         });
 
@@ -428,15 +442,13 @@ serve(async (req) => {
           let troubleshootingSteps = [];
 
           if (appsScriptResponse.status === 401) {
-            troubleshootingMessage = 'Apps Script authentication failed - deployment configuration issue';
+            troubleshootingMessage = 'Apps Script authentication failed - check secret token or deployment configuration';
             troubleshootingSteps = [
-              '1. Open your Google Apps Script project',
-              '2. Click Deploy > Manage Deployments',
-              '3. Click the edit icon (pencil) on your deployment',
+              '1. Verify the APPS_SCRIPT_SECRET is correctly set in Supabase',
+              '2. Ensure your Apps Script accepts the Bearer token in Authorization header',
+              '3. Check Apps Script deployment permissions',
               '4. Set "Execute as" to "User accessing the web app"',
-              '5. Set "Who has access" to "Anyone"',
-              '6. Click "Deploy" to update the deployment',
-              '7. Copy the new Web App URL if it changed'
+              '5. Set "Who has access" to "Anyone"'
             ];
           } else if (appsScriptResponse.status === 404) {
             troubleshootingMessage = 'Apps Script URL not found - check deployment URL';
@@ -463,7 +475,8 @@ serve(async (req) => {
                 message: troubleshootingMessage,
                 steps: troubleshootingSteps,
                 apps_script_url: appsScriptUrl,
-                error_details: errorText.substring(0, 200)
+                error_details: errorText.substring(0, 200),
+                has_secret_configured: !!appsScriptSecret
               }
             }),
             { 
@@ -488,7 +501,8 @@ serve(async (req) => {
             debug: {
               apps_script_url: appsScriptUrl,
               payload_sent: payload.action,
-              flow_name: payload.userConfig.flowName
+              flow_name: payload.userConfig.flowName,
+              used_secret_auth: !!appsScriptSecret
             }
           }),
           { 
