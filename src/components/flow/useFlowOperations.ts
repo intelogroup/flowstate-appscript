@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -66,8 +65,8 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Simplified payload preparation
-      addDebugInfo("📋 Step 4: Simplified payload preparation");
+      // Step 4: Payload preparation with explicit structure
+      addDebugInfo("📋 Step 4: Payload preparation with explicit structure");
       const requestPayload = {
         action: 'run_flow',
         flowId: flow.id,
@@ -78,35 +77,37 @@ export const useFlowOperations = (
           user_email: session.user?.email,
           provider: session.user?.app_metadata?.provider,
           flow_name: flow.flow_name,
-          client_version: '5.0-simplified'
+          client_version: '6.0-fixed-payload',
+          request_source: 'frontend-flowmanager'
         }
       };
 
       addDebugInfo(`📦 Payload prepared with ${Object.keys(requestPayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
+      addDebugInfo(`📏 Payload size: ${JSON.stringify(requestPayload).length} characters`);
 
-      // Step 5: Primary method with proper error handling
-      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke");
+      // Step 5: Primary method with corrected body parameter
+      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke with body");
       let response;
       
       try {
-        addDebugInfo("🌐 Calling supabase.functions.invoke...");
+        addDebugInfo("🌐 Calling supabase.functions.invoke with explicit body...");
         
         const invokeStartTime = performance.now();
         response = await supabase.functions.invoke('apps-script-proxy', {
-          body: requestPayload,
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          body: requestPayload
         });
         const invokeEndTime = performance.now();
 
         addDebugInfo(`⏱️ Primary method completed in ${Math.round(invokeEndTime - invokeStartTime)}ms`);
+        addDebugInfo(`📊 Response status: ${response.error ? 'ERROR' : 'SUCCESS'}`);
         
         if (response.error) {
-          addDebugInfo(`❌ Primary method error:`, true);
-          addDebugInfo(`  - Error name: ${response.error.name}`, true);
-          addDebugInfo(`  - Error message: ${response.error.message}`, true);
+          addDebugInfo(`❌ Primary method error details:`, true);
+          addDebugInfo(`- Error: ${JSON.stringify(response.error)}`, true);
+          addDebugInfo(`- Error type: ${typeof response.error}`, true);
+          addDebugInfo(`- Error message: ${response.error.message}`, true);
+          addDebugInfo(`- Error name: ${response.error.name}`, true);
           
           // Check for network-level errors that require fallback
           if (response.error.name === 'FunctionsFetchError') {
@@ -120,14 +121,24 @@ export const useFlowOperations = (
 
       } catch (invokeError) {
         addDebugInfo(`💥 Primary method failed:`, true);
-        addDebugInfo(`  - Error: ${invokeError.message}`, true);
+        addDebugInfo(`- Error: ${invokeError.message}`, true);
         
-        // Step 6: Fallback method using direct fetch
-        addDebugInfo("📋 Step 6: Fallback method - direct fetch");
+        // Step 6: Fallback method using direct fetch with proper headers
+        addDebugInfo("📋 Step 6: Fallback method - direct fetch with enhanced headers");
         
         try {
           const fallbackUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
           addDebugInfo(`🌐 Fallback URL: ${fallbackUrl}`);
+          
+          const fallbackPayload = {
+            ...requestPayload,
+            debug_info: {
+              ...requestPayload.debug_info,
+              fallback_attempt: true,
+              primary_error: invokeError.message,
+              fallback_timestamp: new Date().toISOString()
+            }
+          };
           
           const fallbackStartTime = performance.now();
           
@@ -136,16 +147,11 @@ export const useFlowOperations = (
             headers: {
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
-              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0'
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
+              'x-debug-source': 'flowmanager-fallback',
+              'x-user-agent': 'FlowState-WebApp/1.0-fallback'
             },
-            body: JSON.stringify({
-              ...requestPayload,
-              debug_info: {
-                ...requestPayload.debug_info,
-                fallback_attempt: true,
-                primary_error: invokeError.message
-              }
-            })
+            body: JSON.stringify(fallbackPayload)
           });
 
           const fallbackEndTime = performance.now();
@@ -175,7 +181,7 @@ export const useFlowOperations = (
 
         } catch (fetchError) {
           addDebugInfo(`💥 Fallback method also failed:`, true);
-          addDebugInfo(`  - Error: ${fetchError.message}`, true);
+          addDebugInfo(`- Error: ${fetchError.message}`, true);
           
           toast({
             title: "🔴 Complete Network Failure",
@@ -188,12 +194,20 @@ export const useFlowOperations = (
 
       // Step 7: Response analysis
       addDebugInfo(`📋 Step 7: Response analysis`);
+      addDebugInfo(`🔍 Response structure analysis:`);
+      addDebugInfo(`- Has error: ${!!response.error}`);
+      addDebugInfo(`- Has data: ${!!response.data}`);
+      addDebugInfo(`- Response type: ${typeof response}`);
       
       if (response.error) {
         addDebugInfo(`❌ === ERROR ANALYSIS ===`, true);
         const errorMessage = response.error.message || 'Unknown error';
         
-        addDebugInfo(`🔍 Error message: "${errorMessage}"`, true);
+        addDebugInfo(`🔍 Error details:`, true);
+        addDebugInfo(`- Name: "${response.error.name}"`, true);
+        addDebugInfo(`- Message: "${errorMessage}"`, true);
+        addDebugInfo(`- Status: ${response.error.status || 'Unknown status'}`, true);
+        addDebugInfo(`- Full error: ${JSON.stringify(response.error)}`, true);
         
         // Enhanced error categorization
         if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
@@ -232,6 +246,20 @@ export const useFlowOperations = (
           return;
         }
 
+        // Check for specific error patterns
+        if (errorMessage.includes('Empty request body')) {
+          addDebugInfo(`💥 Request body transmission failed - payload not sent`, true);
+          toast({
+            title: "🔴 Request Transmission Failed",
+            description: "The request payload was not transmitted properly. Please try again.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        addDebugInfo(`💥 Unhandled error category: ${errorMessage}`, true);
+        addDebugInfo(`💥 Error context: ${JSON.stringify(response.error.context || {})}`, true);
+
         // Generic error handling
         toast({
           title: "🔴 Flow Execution Failed",
@@ -247,6 +275,7 @@ export const useFlowOperations = (
       
       if (response.data) {
         addDebugInfo(`📊 Success data received`);
+        addDebugInfo(`📋 Response keys: ${Object.keys(response.data).join(', ')}`);
       }
 
       toast({
@@ -259,6 +288,7 @@ export const useFlowOperations = (
     } catch (error) {
       addDebugInfo(`💥 === UNEXPECTED ERROR ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
+      addDebugInfo(`🔍 Error type: ${error.constructor.name}`, true);
       
       toast({
         title: "🔴 Unexpected Error",
