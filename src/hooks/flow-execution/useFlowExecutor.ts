@@ -37,35 +37,31 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       return null;
     }
 
-    // Enhanced and comprehensive token validation
-    const accessToken = session.access_token;
+    // Extract Google OAuth tokens from session
+    const googleAccessToken = session.provider_token; // This is the actual Google OAuth token
+    const supabaseAccessToken = session.access_token; // This is Supabase's JWT token
     const refreshToken = session.refresh_token;
-    const providerToken = session.provider_token;
 
-    console.log('[FLOW EXECUTOR] Comprehensive session debug:', {
+    console.log('[FLOW EXECUTOR] Token analysis:', {
       hasSession: !!session,
       hasUser: !!session.user,
-      hasAccessToken: !!accessToken,
+      hasSupabaseToken: !!supabaseAccessToken,
+      hasGoogleToken: !!googleAccessToken,
       hasRefreshToken: !!refreshToken,
-      hasProviderToken: !!providerToken,
       provider: session.user?.app_metadata?.provider,
       isGoogleConnected,
-      sessionKeys: Object.keys(session || {}),
-      userKeys: Object.keys(session.user || {}),
       // Safe token length checks
-      accessTokenLength: accessToken?.length || 0,
-      providerTokenLength: providerToken?.length || 0,
+      supabaseTokenLength: supabaseAccessToken?.length || 0,
+      googleTokenLength: googleAccessToken?.length || 0,
       refreshTokenLength: refreshToken?.length || 0,
       // Safe token previews for debugging
-      accessTokenStart: accessToken?.substring(0, 20) || 'none',
-      providerTokenStart: providerToken?.substring(0, 20) || 'none'
+      supabaseTokenStart: supabaseAccessToken?.substring(0, 20) || 'none',
+      googleTokenStart: googleAccessToken?.substring(0, 20) || 'none'
     });
 
-    // Check for any valid OAuth token
-    const validOAuthToken = accessToken || providerToken;
-    
-    if (!validOAuthToken) {
-      const errorMsg = "Google OAuth tokens not found. Please refresh your authentication.";
+    // For Google Apps Script, we need the Google OAuth token, not Supabase JWT
+    if (!googleAccessToken) {
+      const errorMsg = "Google OAuth token not found. Please refresh your authentication.";
       addLog(errorMsg, true);
       addLog("🔧 Attempting to refresh session automatically...", false);
       
@@ -73,13 +69,12 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       try {
         await refreshSession();
         // After refresh, check again
-        const newSession = session; // This will be updated by the auth context
-        const newToken = newSession?.access_token || newSession?.provider_token;
+        const newGoogleToken = session?.provider_token;
         
-        if (!newToken) {
+        if (!newGoogleToken) {
           toast({
-            title: "🔴 Token Issue",
-            description: "Please sign out and sign in again with Google.",
+            title: "🔴 Google Token Missing",
+            description: "Please sign out and sign in again with Google to get proper OAuth tokens.",
             variant: "destructive"
           });
           return null;
@@ -97,8 +92,8 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
 
     const startTime = Date.now();
     addLog(`🚀 Starting execution for flow: ${flow.flow_name}`);
-    addLog(`🔑 Using Google tokens - Access: ${!!accessToken}, Provider: ${!!providerToken}`);
-    addLog(`📊 Token details: Access(${accessToken?.length || 0} chars), Provider(${providerToken?.length || 0} chars)`);
+    addLog(`🔑 Using Google OAuth token: ${!!googleAccessToken} (${googleAccessToken?.length || 0} chars)`);
+    addLog(`📊 Token source: ${googleAccessToken ? 'provider_token (Google OAuth)' : 'access_token fallback'}`);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
@@ -114,16 +109,15 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         showEmailDetails: true // Show email details in debug
       };
 
-      // Enhanced and comprehensive token structure
+      // Use the actual Google OAuth token for Apps Script
       const googleTokens = {
-        access_token: validOAuthToken || '', // Use the best available token
+        access_token: googleAccessToken || '', // Use Google OAuth token
         refresh_token: refreshToken || '',
-        provider_token: providerToken || accessToken || '' // Fallback chain
+        provider_token: googleAccessToken || '' // Same as access_token for Google
       };
 
       addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
-      addLog(`🔐 Tokens prepared - Primary: ${googleTokens.access_token.substring(0, 20)}...`);
-      addLog(`🔄 Backup tokens - Provider: ${googleTokens.provider_token.substring(0, 20)}...`);
+      addLog(`🔐 Google OAuth token prepared: ${googleTokens.access_token.substring(0, 20)}...`);
       
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
@@ -185,10 +179,11 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         
         // Check for authentication-specific errors
         if (errorMessage.includes('401') || errorMessage.includes('Invalid auth_token') || errorMessage.includes('authentication')) {
-          addLog("🔧 Detected authentication error - this might be a token issue", true);
+          addLog("🔧 Detected authentication error - this might be a Google OAuth token issue", true);
+          addLog("💡 Tip: Try signing out and signing in again to refresh Google OAuth tokens", false);
           toast({
-            title: "🔐 Authentication Error",
-            description: "Your Google authentication may have expired. Please try refreshing or signing in again.",
+            title: "🔐 Google Authentication Error",
+            description: "Your Google OAuth tokens may have expired. Please try signing out and signing in again.",
             variant: "destructive"
           });
         } else {
@@ -217,10 +212,10 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         });
       } else if (errorMessage.includes('401') || errorMessage.includes('Invalid auth_token')) {
         addLog(`🔐 Authentication error: ${errorMessage}`, true);
-        addLog("💡 Tip: Try refreshing your Google authentication", false);
+        addLog("💡 Tip: Try signing out and signing in again to refresh Google OAuth tokens", false);
         toast({
-          title: "🔐 Authentication Error",
-          description: "Please refresh your authentication and try again.",
+          title: "🔐 Google Authentication Error",
+          description: "Please sign out and sign in again to refresh your Google OAuth tokens.",
           variant: "destructive"
         });
       } else {
