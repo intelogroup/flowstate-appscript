@@ -17,8 +17,11 @@ interface FlowConfig {
 
 interface RequestBody {
   action: string
-  userConfig: FlowConfig
+  flowId?: string
+  access_token?: string
+  userConfig?: FlowConfig
   googleTokens?: any
+  debug_info?: any
 }
 
 serve(async (req) => {
@@ -63,9 +66,9 @@ serve(async (req) => {
           troubleshooting: {
             message: 'Secret token missing',
             steps: [
-              '1. Run setupScriptSecret() in your Apps Script to generate a secret',
-              '2. Copy the generated secret',
-              '3. Set it as APPS_SCRIPT_SECRET in Supabase Edge Function secrets'
+              '1. Generate a secret using Apps Script PropertiesService',
+              '2. Store it as APPS_SCRIPT_SECRET in Supabase Edge Function secrets',
+              '3. Use the same secret in your Apps Script code for validation'
             ]
           }
         }),
@@ -76,14 +79,16 @@ serve(async (req) => {
       )
     }
 
-    // Parse request body
-    let requestBody: RequestBody
+    // Parse request body - this is the original payload from React
+    let originalPayload: RequestBody
     try {
-      requestBody = await req.json()
-      console.log('📝 Request parsed:', {
-        action: requestBody.action,
-        hasUserConfig: !!requestBody.userConfig,
-        flowName: requestBody.userConfig?.flowName
+      originalPayload = await req.json()
+      console.log('📝 Original payload parsed:', {
+        action: originalPayload.action,
+        flowId: originalPayload.flowId,
+        hasAccessToken: !!originalPayload.access_token,
+        hasUserConfig: !!originalPayload.userConfig,
+        flowName: originalPayload.userConfig?.flowName
       })
     } catch (error) {
       console.error('❌ Failed to parse request body:', error)
@@ -100,11 +105,11 @@ serve(async (req) => {
     }
 
     // Validate request
-    if (!requestBody.action || !requestBody.userConfig) {
+    if (!originalPayload.action) {
       return new Response(
         JSON.stringify({
-          error: 'Missing required fields: action and userConfig',
-          received: Object.keys(requestBody)
+          error: 'Missing required field: action',
+          received: Object.keys(originalPayload)
         }),
         { 
           status: 400, 
@@ -113,32 +118,29 @@ serve(async (req) => {
       )
     }
 
-    // Prepare payload for Apps Script
-    const payload = {
-      auth_token: appsScriptSecret, // ✅ CORRECT: Send secret in JSON body
-      action: requestBody.action,
-      userConfig: requestBody.userConfig,
-      googleTokens: requestBody.googleTokens || null
+    // ✅ NEW: Create body-based authentication payload for Apps Script
+    const bodyForGas = {
+      secret: appsScriptSecret,  // Secret is now in the body, not headers
+      payload: originalPayload   // Original data is nested inside
     }
 
-    console.log('📤 Calling Apps Script:', {
+    console.log('📤 Calling Apps Script with body-based auth:', {
       url: appsScriptUrl,
-      action: payload.action,
-      userConfig: {
-        emailFilter: payload.userConfig.emailFilter,
-        driveFolder: payload.userConfig.driveFolder,
-        fileTypes: payload.userConfig.fileTypes,
-        flowName: payload.userConfig.flowName
-      }
+      action: originalPayload.action,
+      flowId: originalPayload.flowId,
+      hasSecret: !!appsScriptSecret,
+      authMethod: 'body-based'
     })
 
-    // Call Apps Script
+    // ✅ UPDATED: Call Apps Script with secret in body instead of headers
     const response = await fetch(appsScriptUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // ✅ REMOVED: No more Authorization header
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(bodyForGas),  // ✅ NEW: Send secret in body
+      redirect: 'follow'
     })
 
     console.log('📥 Apps Script response status:', response.status)
@@ -159,27 +161,27 @@ serve(async (req) => {
         JSON.stringify({
           error: `Apps Script error (${response.status}): ${
             isHtmlResponse 
-              ? 'Apps Script deployment requires authentication - check deployment settings' 
+              ? 'Apps Script deployment access issue - check deployment settings' 
               : response.statusText || 'Unknown error'
           }`,
           request_id: crypto.randomUUID(),
           apps_script_status: response.status,
           troubleshooting: {
             message: isHtmlResponse 
-              ? 'Apps Script deployment requires authentication - check deployment settings'
+              ? 'Apps Script deployment needs proper access settings'
               : 'Apps Script returned an error',
             steps: isHtmlResponse ? [
               '1. Go to your Apps Script project',
               '2. Click Deploy → Manage deployments', 
               '3. Click the gear icon to edit deployment settings',
-              '4. Set "Execute as" to "Me" (NOT "User accessing the web app")', // ✅ FIXED
+              '4. Set "Execute as" to "Me" (your account)',
               '5. Set "Who has access" to "Anyone"',
-              '6. Click Deploy and use the new URL',
-              '7. Test the URL in browser - you should see JSON, not HTML'
+              '6. Click Deploy and test the new URL',
+              '7. Ensure your doPost function validates the secret in request body'
             ] : [
               '1. Check Apps Script logs for detailed error information',
               '2. Verify the secret token matches between Supabase and Apps Script',
-              '3. Ensure your Apps Script code handles the request properly'
+              '3. Ensure your Apps Script doPost function handles body-based auth'
             ]
           },
           apps_script_url: appsScriptUrl,
@@ -202,7 +204,8 @@ serve(async (req) => {
       console.log('✅ Apps Script success:', {
         status: appsScriptData.status,
         message: appsScriptData.message,
-        dataKeys: Object.keys(appsScriptData.data || {})
+        dataKeys: Object.keys(appsScriptData.data || {}),
+        authMethod: 'body-based'
       })
     } catch (error) {
       console.error('❌ Failed to parse Apps Script response:', error)
@@ -224,6 +227,7 @@ serve(async (req) => {
         success: true,
         message: 'Flow processed successfully',
         timestamp: new Date().toISOString(),
+        auth_method: 'body-based',
         apps_script_response: appsScriptData
       }),
       { 
