@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -12,7 +13,6 @@ interface UserFlow {
   auto_run: boolean;
   frequency: string;
   created_at: string;
-  older_than_minutes?: number;
 }
 
 export const useFlowExecution = () => {
@@ -63,8 +63,7 @@ export const useFlowExecution = () => {
         fileTypes: flow.file_types || [],
         userId: flow.id,
         flowName: flow.flow_name,
-        maxEmails: 5, // Default to 5 emails for better performance
-        olderThanMinutes: flow.older_than_minutes || 60 // Default to 1 hour if not specified
+        maxEmails: 5 // Default to 5 emails for better performance
       };
 
       const googleTokens = {

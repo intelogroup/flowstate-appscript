@@ -13,7 +13,6 @@ interface UserFlow {
   auto_run: boolean;
   frequency: string;
   created_at: string;
-  older_than_minutes?: number;
 }
 
 interface FlowCardProps {
@@ -68,12 +67,6 @@ const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }
           <div>
             <span className="font-medium">File Types:</span>
             <p>{flow.file_types.join(', ')}</p>
-          </div>
-        )}
-        {flow.older_than_minutes && (
-          <div>
-            <span className="font-medium">Time Filter:</span>
-            <p>Emails older than {flow.older_than_minutes} minutes</p>
           </div>
         )}
         <div>

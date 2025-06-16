@@ -1,3 +1,4 @@
+
 import { supabase } from '@/integrations/supabase/client';
 
 export interface FlowConfig {
@@ -7,7 +8,6 @@ export interface FlowConfig {
   userId?: string;
   flowName?: string;
   maxEmails?: number;
-  olderThanMinutes?: number;
 }
 
 export interface FlowExecutionResult {
