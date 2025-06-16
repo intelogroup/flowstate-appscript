@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFlowManagement } from '@/hooks/useFlowManagement';
 import { useFlowExecution } from '@/hooks/useFlowExecution';
+import { useFlowCooldown } from '@/hooks/useFlowCooldown';
 
 // Import the refactored components
 import DebugPanel from './flow/DebugPanel';
@@ -11,20 +12,24 @@ import AuthStatusAlert from './flow/AuthStatusAlert';
 import EmptyFlowsMessage from './flow/EmptyFlowsMessage';
 import FlowManagerHeader from './flow/FlowManagerHeader';
 import LoadingState from './flow/LoadingState';
-import FlowList from './flow/FlowList';
 import PerformanceMonitor from './flow/PerformanceMonitor';
+import FlowCard from './flow/FlowCard';
 
 const FlowManager = React.memo(() => {
   const { session } = useAuth();
   const { userFlows, isLoading, deleteFlow } = useFlowManagement();
   const { runningFlows, executionLogs, executeFlow, clearLogs, checkConnectivity } = useFlowExecution();
+  const { startCooldown, getCooldownInfo } = useFlowCooldown();
 
   // Check if user has Google authentication
   const hasGoogleAuth = !!(session?.provider_token || session?.access_token);
 
   const handleRunFlow = React.useCallback(async (flow: any) => {
-    await executeFlow(flow);
-  }, [executeFlow]);
+    const result = await executeFlow(flow);
+    if (result && result.success) {
+      startCooldown(flow.id);
+    }
+  }, [executeFlow, startCooldown]);
 
   const handleDeleteFlow = React.useCallback(async (flowId: string) => {
     await deleteFlow(flowId);
@@ -74,13 +79,25 @@ const FlowManager = React.memo(() => {
           {!userFlows || userFlows.length === 0 ? (
             <EmptyFlowsMessage hasGoogleAuth={hasGoogleAuth} />
           ) : (
-            <FlowList
-              flows={userFlows}
-              runningFlows={runningFlows}
-              hasGoogleAuth={hasGoogleAuth}
-              onRun={handleRunFlow}
-              onDelete={handleDeleteFlow}
-            />
+            <div className="space-y-4">
+              {userFlows.map((flow) => {
+                const isRunning = runningFlows.has(flow.id);
+                const cooldownInfo = getCooldownInfo(flow.id);
+                
+                return (
+                  <FlowCard
+                    key={flow.id}
+                    flow={flow}
+                    isRunning={isRunning}
+                    hasGoogleAuth={hasGoogleAuth}
+                    isOnCooldown={cooldownInfo.isOnCooldown}
+                    cooldownDisplay={cooldownInfo.displayTime}
+                    onRun={handleRunFlow}
+                    onDelete={handleDeleteFlow}
+                  />
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>

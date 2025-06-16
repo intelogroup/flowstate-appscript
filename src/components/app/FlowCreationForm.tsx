@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { CheckCircle } from 'lucide-react';
 
@@ -15,7 +14,7 @@ interface FlowCreationFormProps {
 const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
   const [flowData, setFlowData] = useState({
     flowName: '',
-    emailFilter: '',
+    senders: '',
     driveFolder: '',
     fileTypes: [] as string[],
     autoRun: false,
@@ -30,22 +29,44 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
   };
 
   const handleSubmit = async () => {
-    if (!flowData.flowName || !flowData.emailFilter || !flowData.driveFolder) {
+    if (!flowData.flowName || !flowData.senders || !flowData.driveFolder) {
       return;
     }
 
-    await onSubmit(flowData);
+    // Convert senders to email filter format for backend compatibility
+    const emailFilter = `from:(${flowData.senders}) has:attachment`;
+    
+    const submissionData = {
+      ...flowData,
+      emailFilter, // Backend still expects emailFilter
+      senders: flowData.senders // Keep original senders for display
+    };
+
+    await onSubmit(submissionData);
     
     // Reset form
     setFlowData({
       flowName: '',
-      emailFilter: '',
+      senders: '',
       driveFolder: '',
       fileTypes: [],
       autoRun: false,
       frequency: 'daily'
     });
   };
+
+  // Apps Script compatible frequency options
+  const frequencyOptions = [
+    { value: 'minute', label: 'Every minute' },
+    { value: '5minutes', label: 'Every 5 minutes' },
+    { value: '10minutes', label: 'Every 10 minutes' },
+    { value: '15minutes', label: 'Every 15 minutes' },
+    { value: '30minutes', label: 'Every 30 minutes' },
+    { value: 'hourly', label: 'Every hour' },
+    { value: '6hours', label: 'Every 6 hours' },
+    { value: '12hours', label: 'Every 12 hours' },
+    { value: 'daily', label: 'Daily' }
+  ];
 
   return (
     <div className="space-y-6">
@@ -61,19 +82,18 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         />
       </div>
 
-      {/* Email Filter */}
+      {/* Email Senders */}
       <div className="space-y-2">
-        <Label htmlFor="emailFilter">Email Filter *</Label>
-        <Textarea
-          id="emailFilter"
-          placeholder="e.g., from:invoices@company.com has:attachment"
-          value={flowData.emailFilter}
-          onChange={(e) => updateFlowData('emailFilter', e.target.value)}
-          className="border-gray-200 focus:border-blue-500 resize-none"
-          rows={3}
+        <Label htmlFor="senders">Email Sender(s) *</Label>
+        <Input
+          id="senders"
+          placeholder="e.g., invoices@company.com or invoices@company.com, billing@supplier.com"
+          value={flowData.senders}
+          onChange={(e) => updateFlowData('senders', e.target.value)}
+          className="border-gray-200 focus:border-blue-500"
         />
         <p className="text-sm text-gray-500">
-          Use Gmail search syntax to define which emails to process (from the last hour)
+          Enter one or multiple email addresses separated by commas. We'll automatically look for emails with attachments.
         </p>
       </div>
 
@@ -110,7 +130,7 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         <div className="space-y-1">
           <Label>Auto-run Flow</Label>
           <p className="text-sm text-gray-500">
-            Automatically process new emails from the last hour
+            Automatically process new emails at regular intervals
           </p>
         </div>
         <Switch
@@ -131,9 +151,11 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="hourly">Every hour</SelectItem>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="weekly">Weekly</SelectItem>
+              {frequencyOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -144,14 +166,14 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         onClick={handleSubmit}
         className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
         size="lg"
-        disabled={!flowData.flowName || !flowData.emailFilter || !flowData.driveFolder}
+        disabled={!flowData.flowName || !flowData.senders || !flowData.driveFolder}
       >
         <CheckCircle className="w-5 h-5 mr-2" />
         Set Flow
       </Button>
 
       <p className="text-center text-sm text-gray-500">
-        Your flow will process emails from the last hour automatically
+        Your flow will automatically save email attachments to Google Drive
       </p>
     </div>
   );

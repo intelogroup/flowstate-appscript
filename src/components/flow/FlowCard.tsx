@@ -13,17 +13,28 @@ interface UserFlow {
   auto_run: boolean;
   frequency: string;
   created_at: string;
+  senders?: string; // New field for display
 }
 
 interface FlowCardProps {
   flow: UserFlow;
   isRunning: boolean;
   hasGoogleAuth: boolean;
+  isOnCooldown: boolean;
+  cooldownDisplay: string;
   onRun: (flow: UserFlow) => void;
   onDelete: (flowId: string) => void;
 }
 
-const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }: FlowCardProps) => {
+const FlowCard = React.memo(({ 
+  flow, 
+  isRunning, 
+  hasGoogleAuth, 
+  isOnCooldown,
+  cooldownDisplay,
+  onRun, 
+  onDelete 
+}: FlowCardProps) => {
   const handleRun = React.useCallback(() => {
     onRun(flow);
   }, [flow, onRun]);
@@ -31,6 +42,28 @@ const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }
   const handleDelete = React.useCallback(() => {
     onDelete(flow.id);
   }, [flow.id, onDelete]);
+
+  // Extract senders from email_filter for display or use the senders field
+  const displaySenders = flow.senders || 
+    (flow.email_filter?.match(/from:\((.*?)\)/)?.[1] || 
+     flow.email_filter?.replace(/has:attachment/g, '').trim());
+
+  // Format frequency for display
+  const getFrequencyLabel = (freq: string) => {
+    const frequencyMap: Record<string, string> = {
+      'minute': 'Every minute',
+      '5minutes': 'Every 5 minutes',
+      '10minutes': 'Every 10 minutes', 
+      '15minutes': 'Every 15 minutes',
+      '30minutes': 'Every 30 minutes',
+      'hourly': 'Every hour',
+      '6hours': 'Every 6 hours',
+      '12hours': 'Every 12 hours',
+      'daily': 'Daily',
+      'weekly': 'Weekly'
+    };
+    return frequencyMap[freq] || freq;
+  };
 
   return (
     <div className="border rounded-lg p-4 space-y-3">
@@ -40,7 +73,7 @@ const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }
           {flow.auto_run && (
             <Badge variant="secondary" className="flex items-center">
               <Clock className="w-3 h-3 mr-1" />
-              {flow.frequency}
+              {getFrequencyLabel(flow.frequency)}
             </Badge>
           )}
           <FlowActions
@@ -48,6 +81,8 @@ const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }
             flowName={flow.flow_name}
             isRunning={isRunning}
             hasGoogleAuth={hasGoogleAuth}
+            isOnCooldown={isOnCooldown}
+            cooldownDisplay={cooldownDisplay}
             onRun={handleRun}
             onDelete={handleDelete}
           />
@@ -56,8 +91,8 @@ const FlowCard = React.memo(({ flow, isRunning, hasGoogleAuth, onRun, onDelete }
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
         <div>
-          <span className="font-medium">Email Filter:</span>
-          <p className="break-all">{flow.email_filter}</p>
+          <span className="font-medium">Email Senders:</span>
+          <p className="break-all">{displaySenders || 'Not specified'}</p>
         </div>
         <div>
           <span className="font-medium">Drive Folder:</span>
