@@ -1,11 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
+import { extractDebugInfo, logNetworkEvent, generateRequestId, createRetryableError } from "../_shared/network-utils.ts"
 
 interface FlowConfig {
   emailFilter: string
@@ -25,229 +21,266 @@ interface RequestBody {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  const debugInfo = extractDebugInfo(req);
+  logNetworkEvent('REQUEST_RECEIVED', debugInfo);
+
+  // Enhanced CORS preflight handling
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    logNetworkEvent('CORS_PREFLIGHT', { request_id: debugInfo.request_id });
+    return handleCorsPrelight();
   }
 
   try {
-    console.log('🚀 Edge Function called:', req.method)
+    logNetworkEvent('FUNCTION_START', { request_id: debugInfo.request_id });
 
-    // Get environment variables
+    // Get environment variables with enhanced error reporting
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
     const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET')
 
     if (!appsScriptUrl) {
-      console.error('❌ Missing APPS_SCRIPT_URL environment variable')
-      return new Response(
-        JSON.stringify({
-          error: 'Configuration error: APPS_SCRIPT_URL not set',
-          troubleshooting: {
-            message: 'Environment variable missing',
-            steps: [
-              '1. Set APPS_SCRIPT_URL in your Supabase Edge Function secrets',
-              '2. Use your Apps Script web app deployment URL',
-              '3. Format: https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
-            ]
-          }
-        }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      logNetworkEvent('CONFIG_ERROR', { 
+        error: 'APPS_SCRIPT_URL missing', 
+        request_id: debugInfo.request_id 
+      });
+      return createCorsResponse({
+        error: 'Configuration error: APPS_SCRIPT_URL not set',
+        request_id: debugInfo.request_id,
+        troubleshooting: {
+          message: 'Environment variable missing',
+          steps: [
+            '1. Set APPS_SCRIPT_URL in your Supabase Edge Function secrets',
+            '2. Use your Apps Script web app deployment URL',
+            '3. Format: https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
+          ]
         }
-      )
+      }, 500);
     }
 
     if (!appsScriptSecret) {
-      console.error('❌ Missing APPS_SCRIPT_SECRET environment variable')
-      return new Response(
-        JSON.stringify({
-          error: 'Configuration error: APPS_SCRIPT_SECRET not set',
-          troubleshooting: {
-            message: 'Secret token missing',
-            steps: [
-              '1. Generate a secret using Apps Script PropertiesService',
-              '2. Store it as APPS_SCRIPT_SECRET in Supabase Edge Function secrets',
-              '3. Use the same secret in your Apps Script code for validation'
-            ]
-          }
-        }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      logNetworkEvent('CONFIG_ERROR', { 
+        error: 'APPS_SCRIPT_SECRET missing', 
+        request_id: debugInfo.request_id 
+      });
+      return createCorsResponse({
+        error: 'Configuration error: APPS_SCRIPT_SECRET not set',
+        request_id: debugInfo.request_id,
+        troubleshooting: {
+          message: 'Secret token missing',
+          steps: [
+            '1. Generate a secret using Apps Script PropertiesService',
+            '2. Store it as APPS_SCRIPT_SECRET in Supabase Edge Function secrets',
+            '3. Use the same secret in your Apps Script code for validation'
+          ]
         }
-      )
+      }, 500);
     }
 
-    // Parse request body - this is the original payload from React
+    // Enhanced request body parsing with size validation
     let originalPayload: RequestBody
     try {
-      originalPayload = await req.json()
-      console.log('📝 Original payload parsed:', {
+      const bodyText = await req.text();
+      logNetworkEvent('BODY_RECEIVED', { 
+        size: bodyText.length, 
+        preview: bodyText.substring(0, 100),
+        request_id: debugInfo.request_id 
+      });
+
+      if (bodyText.length > 1024 * 1024) { // 1MB limit
+        throw createRetryableError('Request payload too large (>1MB)', false);
+      }
+
+      originalPayload = JSON.parse(bodyText);
+      logNetworkEvent('PAYLOAD_PARSED', {
         action: originalPayload.action,
         flowId: originalPayload.flowId,
         hasAccessToken: !!originalPayload.access_token,
         hasUserConfig: !!originalPayload.userConfig,
-        flowName: originalPayload.userConfig?.flowName
-      })
+        flowName: originalPayload.userConfig?.flowName,
+        request_id: debugInfo.request_id
+      });
     } catch (error) {
-      console.error('❌ Failed to parse request body:', error)
-      return new Response(
-        JSON.stringify({
-          error: 'Invalid JSON in request body',
-          details: error.message
-        }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
+      logNetworkEvent('PARSE_ERROR', { 
+        error: error.message, 
+        request_id: debugInfo.request_id 
+      });
+      return createCorsResponse({
+        error: 'Invalid JSON in request body',
+        details: error.message,
+        request_id: debugInfo.request_id
+      }, 400);
     }
 
-    // Validate request
+    // Validate required fields
     if (!originalPayload.action) {
-      return new Response(
-        JSON.stringify({
-          error: 'Missing required field: action',
-          received: Object.keys(originalPayload)
-        }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
+      return createCorsResponse({
+        error: 'Missing required field: action',
+        received: Object.keys(originalPayload),
+        request_id: debugInfo.request_id
+      }, 400);
     }
 
-    // ✅ NEW: Create body-based authentication payload for Apps Script
+    // Create enhanced body for Google Apps Script
     const bodyForGas = {
-      secret: appsScriptSecret,  // Secret is now in the body, not headers
-      payload: originalPayload   // Original data is nested inside
+      secret: appsScriptSecret,
+      payload: originalPayload,
+      debug_info: {
+        ...debugInfo,
+        supabase_timestamp: new Date().toISOString(),
+        auth_method: 'body-based-v2'
+      }
     }
 
-    console.log('📤 Calling Apps Script with body-based auth:', {
+    logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
       action: originalPayload.action,
       flowId: originalPayload.flowId,
-      hasSecret: !!appsScriptSecret,
-      authMethod: 'body-based'
-    })
+      request_id: debugInfo.request_id,
+      payload_size: JSON.stringify(bodyForGas).length
+    });
 
-    // ✅ UPDATED: Call Apps Script with secret in body instead of headers
-    const response = await fetch(appsScriptUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // ✅ REMOVED: No more Authorization header
-      },
-      body: JSON.stringify(bodyForGas),  // ✅ NEW: Send secret in body
-      redirect: 'follow'
-    })
+    // Enhanced fetch with timeout and retry logic
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    console.log('📥 Apps Script response status:', response.status)
+    let response;
+    try {
+      response = await fetch(appsScriptUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Supabase-Edge-Function/2.0',
+          'X-Request-ID': debugInfo.request_id
+        },
+        body: JSON.stringify(bodyForGas),
+        redirect: 'follow',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      logNetworkEvent('FETCH_ERROR', { 
+        error: fetchError.message,
+        name: fetchError.name,
+        request_id: debugInfo.request_id
+      });
+      
+      if (fetchError.name === 'AbortError') {
+        return createCorsResponse({
+          error: 'Apps Script request timeout (30s)',
+          request_id: debugInfo.request_id,
+          troubleshooting: {
+            message: 'The request to Google Apps Script timed out',
+            steps: [
+              '1. Check if your Apps Script deployment is responding',
+              '2. Verify the APPS_SCRIPT_URL is correct',
+              '3. Try again in a few minutes'
+            ]
+          }
+        }, 504);
+      }
+      
+      throw fetchError;
+    }
+
+    logNetworkEvent('APPS_SCRIPT_RESPONSE', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      request_id: debugInfo.request_id
+    });
 
     if (!response.ok) {
-      const responseText = await response.text()
-      console.error('❌ Apps Script error:', {
+      const responseText = await response.text();
+      logNetworkEvent('APPS_SCRIPT_ERROR', {
         status: response.status,
         statusText: response.statusText,
-        body: responseText.substring(0, 500)
-      })
+        body: responseText.substring(0, 500),
+        request_id: debugInfo.request_id
+      });
 
-      // Check if it's an HTML response (login page)
       const isHtmlResponse = responseText.trim().startsWith('<!DOCTYPE') || 
                            responseText.trim().startsWith('<html')
 
-      return new Response(
-        JSON.stringify({
-          error: `Apps Script error (${response.status}): ${
-            isHtmlResponse 
-              ? 'Apps Script deployment access issue - check deployment settings' 
-              : response.statusText || 'Unknown error'
-          }`,
-          request_id: crypto.randomUUID(),
-          apps_script_status: response.status,
-          troubleshooting: {
-            message: isHtmlResponse 
-              ? 'Apps Script deployment needs proper access settings'
-              : 'Apps Script returned an error',
-            steps: isHtmlResponse ? [
-              '1. Go to your Apps Script project',
-              '2. Click Deploy → Manage deployments', 
-              '3. Click the gear icon to edit deployment settings',
-              '4. Set "Execute as" to "Me" (your account)',
-              '5. Set "Who has access" to "Anyone"',
-              '6. Click Deploy and test the new URL',
-              '7. Ensure your doPost function validates the secret in request body'
-            ] : [
-              '1. Check Apps Script logs for detailed error information',
-              '2. Verify the secret token matches between Supabase and Apps Script',
-              '3. Ensure your Apps Script doPost function handles body-based auth'
-            ]
-          },
-          apps_script_url: appsScriptUrl,
-          error_details: responseText.substring(0, 200),
-          auth_method: 'body-based',
-          has_secret_configured: !!appsScriptSecret
-        }),
-        { 
-          status: 502, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
+      return createCorsResponse({
+        error: `Apps Script error (${response.status}): ${
+          isHtmlResponse 
+            ? 'Apps Script deployment access issue - check deployment settings' 
+            : response.statusText || 'Unknown error'
+        }`,
+        request_id: debugInfo.request_id,
+        apps_script_status: response.status,
+        troubleshooting: {
+          message: isHtmlResponse 
+            ? 'Apps Script deployment needs proper access settings'
+            : 'Apps Script returned an error',
+          steps: isHtmlResponse ? [
+            '1. Go to your Apps Script project',
+            '2. Click Deploy → Manage deployments', 
+            '3. Click the gear icon to edit deployment settings',
+            '4. Set "Execute as" to "Me" (your account)',
+            '5. Set "Who has access" to "Anyone"',
+            '6. Click Deploy and test the new URL'
+          ] : [
+            '1. Check Apps Script logs for detailed error information',
+            '2. Verify the secret token matches between Supabase and Apps Script',
+            '3. Ensure your Apps Script doPost function handles body-based auth'
+          ]
+        },
+        apps_script_url: appsScriptUrl,
+        error_details: responseText.substring(0, 200),
+        auth_method: 'body-based-v2'
+      }, 502);
     }
 
-    // Parse Apps Script response
+    // Parse Apps Script response with enhanced error handling
     let appsScriptData
     try {
-      const responseText = await response.text()
-      appsScriptData = JSON.parse(responseText)
-      console.log('✅ Apps Script success:', {
+      const responseText = await response.text();
+      appsScriptData = JSON.parse(responseText);
+      
+      logNetworkEvent('SUCCESS', {
         status: appsScriptData.status,
         message: appsScriptData.message,
         dataKeys: Object.keys(appsScriptData.data || {}),
-        authMethod: 'body-based'
-      })
+        request_id: debugInfo.request_id
+      });
     } catch (error) {
-      console.error('❌ Failed to parse Apps Script response:', error)
-      return new Response(
-        JSON.stringify({
-          error: 'Apps Script returned invalid JSON',
-          details: error.message
-        }),
-        { 
-          status: 502, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      )
+      logNetworkEvent('RESPONSE_PARSE_ERROR', { 
+        error: error.message, 
+        request_id: debugInfo.request_id 
+      });
+      return createCorsResponse({
+        error: 'Apps Script returned invalid JSON',
+        details: error.message,
+        request_id: debugInfo.request_id
+      }, 502);
     }
 
-    // Return successful response
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: 'Flow processed successfully',
-        timestamp: new Date().toISOString(),
-        auth_method: 'body-based',
-        apps_script_response: appsScriptData
-      }),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    )
+    // Return successful response with enhanced metadata
+    return createCorsResponse({
+      success: true,
+      message: 'Flow processed successfully',
+      timestamp: new Date().toISOString(),
+      request_id: debugInfo.request_id,
+      auth_method: 'body-based-v2',
+      debug_info: debugInfo,
+      apps_script_response: appsScriptData
+    }, 200);
 
   } catch (error) {
-    console.error('❌ Edge Function error:', error)
-    return new Response(
-      JSON.stringify({
-        error: 'Edge Function internal error',
-        message: error.message,
-        timestamp: new Date().toISOString()
-      }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    )
+    logNetworkEvent('EDGE_FUNCTION_ERROR', { 
+      error: error.message,
+      name: error.constructor.name,
+      stack: error.stack?.substring(0, 500),
+      request_id: debugInfo.request_id
+    });
+    
+    return createCorsResponse({
+      error: 'Edge Function internal error',
+      message: error.message,
+      timestamp: new Date().toISOString(),
+      request_id: debugInfo.request_id,
+      retryable: (error as any).retryable !== false
+    }, 500);
   }
 })

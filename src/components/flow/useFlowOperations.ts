@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +13,28 @@ interface UserFlow {
   frequency: string;
   created_at: string;
 }
+
+// Enhanced retry logic with exponential backoff
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const retryWithBackoff = async <T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === maxRetries) throw error;
+      
+      const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+      console.log(`Retry attempt ${attempt} failed, waiting ${delay}ms before retry`);
+      await sleep(delay);
+    }
+  }
+  throw new Error('Max retries exceeded');
+};
 
 export const useFlowOperations = (
   addDebugInfo: (message: string, isError?: boolean) => void,
@@ -44,12 +65,12 @@ export const useFlowOperations = (
         return;
       }
 
-      // Step 2: Detailed session logging
-      addDebugInfo("📋 Step 2: Detailed session analysis");
+      // Step 2: Enhanced session logging
+      addDebugInfo("📋 Step 2: Enhanced session analysis");
       logSessionDetails();
 
-      // Step 3: Token preparation
-      addDebugInfo("📋 Step 3: Token preparation");
+      // Step 3: Token preparation with validation
+      addDebugInfo("📋 Step 3: Enhanced token preparation");
       const authToken = session.access_token;
       
       if (!authToken) {
@@ -66,8 +87,8 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Payload preparation - FIXED VERSION
-      addDebugInfo("📋 Step 4: Payload preparation (FIXED VERSION)");
+      // Step 4: Enhanced payload preparation
+      addDebugInfo("📋 Step 4: Enhanced payload preparation with v2 debugging");
       const requestPayload = {
         action: 'run_flow',
         flowId: flow.id,
@@ -78,87 +99,75 @@ export const useFlowOperations = (
           user_email: session.user?.email,
           provider: session.user?.app_metadata?.provider,
           flow_name: flow.flow_name,
-          client_version: '7.0-fixed-body-transmission',
-          request_source: 'frontend-flowmanager'
+          client_version: '8.0-enhanced-cors-v2',
+          request_source: 'frontend-flowmanager-v2',
+          network_debug: true,
+          retry_enabled: true
         }
       };
 
-      addDebugInfo(`📦 Payload prepared with ${Object.keys(requestPayload).length} keys`);
+      addDebugInfo(`📦 Enhanced payload prepared with ${Object.keys(requestPayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
       
       const payloadString = JSON.stringify(requestPayload);
       addDebugInfo(`📏 Payload size: ${payloadString.length} characters`);
-      addDebugInfo(`🔍 Payload preview: ${payloadString.substring(0, 100)}...`);
 
-      // Step 5: Enhanced supabase.functions.invoke call
-      addDebugInfo("📋 Step 5: Enhanced supabase.functions.invoke call");
-      let response;
+      // Step 5: Enhanced network operation with retry logic
+      addDebugInfo("📋 Step 5: Enhanced network operation with retry logic");
       
-      try {
-        addDebugInfo("🌐 Calling supabase.functions.invoke with fixed body parameter...");
+      const executeRequest = async () => {
+        addDebugInfo("🌐 Executing supabase.functions.invoke with enhanced CORS...");
         
         const invokeStartTime = performance.now();
         
-        // FIXED: Use the correct parameter structure for supabase.functions.invoke
-        response = await supabase.functions.invoke('apps-script-proxy', {
+        const response = await supabase.functions.invoke('apps-script-proxy', {
           body: requestPayload,
           headers: {
             'Content-Type': 'application/json',
-            'x-debug-source': 'flowmanager-fixed',
-            'x-user-agent': 'FlowState-WebApp/7.0-fixed'
+            'x-debug-source': 'flowmanager-enhanced-v2',
+            'x-user-agent': 'FlowState-WebApp/8.0-enhanced-cors'
           }
         });
         
         const invokeEndTime = performance.now();
-        addDebugInfo(`⏱️ Primary method completed in ${Math.round(invokeEndTime - invokeStartTime)}ms`);
+        addDebugInfo(`⏱️ Request completed in ${Math.round(invokeEndTime - invokeStartTime)}ms`);
+        
+        return response;
+      };
+
+      let response;
+      try {
+        response = await retryWithBackoff(executeRequest, 3, 1000);
         
         // Enhanced response logging
-        addDebugInfo(`📊 Response received:`);
+        addDebugInfo(`📊 Final response received:`);
         addDebugInfo(`- Has error: ${!!response.error}`);
         addDebugInfo(`- Has data: ${!!response.data}`);
         addDebugInfo(`- Response type: ${typeof response}`);
         
-        if (response.error) {
-          addDebugInfo(`❌ Supabase invoke error:`, true);
-          addDebugInfo(`- Error name: ${response.error.name}`, true);
-          addDebugInfo(`- Error message: ${response.error.message}`, true);
-          addDebugInfo(`- Error context: ${JSON.stringify(response.error.context || {})}`, true);
-          
-          // Check for network-level errors that require fallback
-          if (response.error.name === 'FunctionsFetchError') {
-            addDebugInfo(`🔄 Network error detected, trying fallback method`, true);
-            throw new Error(`Network error: ${response.error.message}`);
-          }
-          
-          // Check for HTTP errors from the Edge Function
-          if (response.error.name === 'FunctionsHttpError') {
-            addDebugInfo(`🔄 HTTP error from Edge Function, trying fallback method`, true);
-            throw new Error(`HTTP error: ${response.error.message}`);
-          }
-        } else {
-          addDebugInfo(`✅ Primary method successful`);
-          addDebugInfo(`📊 Response data: ${response.data ? JSON.stringify(response.data).substring(0, 200) : 'None'}`);
+        if (response.data?.request_id) {
+          addDebugInfo(`🔍 Request ID: ${response.data.request_id}`);
         }
-
-      } catch (invokeError) {
-        addDebugInfo(`💥 Primary method failed:`, true);
-        addDebugInfo(`- Error: ${invokeError.message}`, true);
-        addDebugInfo(`- Error name: ${invokeError.name || 'Unknown'}`, true);
         
-        // Step 6: Enhanced fallback method using direct fetch
-        addDebugInfo("📋 Step 6: Enhanced fallback method using direct fetch");
+      } catch (retryError) {
+        addDebugInfo(`💥 All retry attempts failed:`, true);
+        addDebugInfo(`- Final error: ${retryError.message}`, true);
+        
+        // Enhanced fallback with better error handling
+        addDebugInfo("📋 Step 6: Enhanced fallback method with improved headers");
         
         try {
           const fallbackUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
-          addDebugInfo(`🌐 Fallback URL: ${fallbackUrl}`);
+          addDebugInfo(`🌐 Enhanced fallback URL: ${fallbackUrl}`);
           
           const fallbackPayload = {
             ...requestPayload,
             debug_info: {
               ...requestPayload.debug_info,
               fallback_attempt: true,
-              primary_error: invokeError.message,
-              fallback_timestamp: new Date().toISOString()
+              primary_error: retryError.message,
+              fallback_timestamp: new Date().toISOString(),
+              fallback_version: 'v2-enhanced'
             }
           };
           
@@ -170,20 +179,24 @@ export const useFlowOperations = (
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
               'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-              'x-debug-source': 'flowmanager-fallback-fixed',
-              'x-user-agent': 'FlowState-WebApp/7.0-fallback'
+              'x-debug-source': 'flowmanager-fallback-enhanced-v2',
+              'x-user-agent': 'FlowState-WebApp/8.0-fallback-enhanced',
+              'Origin': window.location.origin,
+              'Referer': window.location.href
             },
-            body: JSON.stringify(fallbackPayload)
+            body: JSON.stringify(fallbackPayload),
+            mode: 'cors',
+            credentials: 'omit'
           });
 
           const fallbackEndTime = performance.now();
-          addDebugInfo(`⏱️ Fallback method completed in ${Math.round(fallbackEndTime - fallbackStartTime)}ms`);
-          addDebugInfo(`📊 Fallback response status: ${fetchResponse.status} ${fetchResponse.statusText}`);
+          addDebugInfo(`⏱️ Fallback completed in ${Math.round(fallbackEndTime - fallbackStartTime)}ms`);
+          addDebugInfo(`📊 Fallback response: ${fetchResponse.status} ${fetchResponse.statusText}`);
 
           if (!fetchResponse.ok) {
             const errorText = await fetchResponse.text();
-            addDebugInfo(`❌ Fallback method failed: ${fetchResponse.status}`, true);
-            addDebugInfo(`❌ Error response: ${errorText}`, true);
+            addDebugInfo(`❌ Fallback failed: ${fetchResponse.status}`, true);
+            addDebugInfo(`❌ Error response: ${errorText.substring(0, 200)}`, true);
             
             toast({
               title: "🔴 Network Connection Error",
@@ -200,28 +213,31 @@ export const useFlowOperations = (
           };
 
           addDebugInfo(`✅ Fallback method successful`);
+          if (responseData.request_id) {
+            addDebugInfo(`🔍 Fallback Request ID: ${responseData.request_id}`);
+          }
 
         } catch (fetchError) {
-          addDebugInfo(`💥 Fallback method also failed:`, true);
+          addDebugInfo(`💥 Enhanced fallback also failed:`, true);
           addDebugInfo(`- Error: ${fetchError.message}`, true);
           
           toast({
             title: "🔴 Complete Network Failure",
-            description: "Unable to reach the Edge Function. Please try again later.",
+            description: "Unable to reach the Edge Function despite enhanced CORS. Please check your network connection.",
             variant: "destructive"
           });
           return;
         }
       }
 
-      // Step 7: Response analysis
-      addDebugInfo(`📋 Step 7: Response analysis`);
+      // Step 7: Enhanced response analysis
+      addDebugInfo(`📋 Step 7: Enhanced response analysis`);
       
       if (response.error) {
-        addDebugInfo(`❌ === ERROR ANALYSIS ===`, true);
+        addDebugInfo(`❌ === ENHANCED ERROR ANALYSIS ===`, true);
         const errorMessage = response.error.message || 'Unknown error';
         
-        addDebugInfo(`🔍 Error details:`, true);
+        addDebugInfo(`🔍 Enhanced error details:`, true);
         addDebugInfo(`- Name: "${response.error.name}"`, true);
         addDebugInfo(`- Message: "${errorMessage}"`, true);
         addDebugInfo(`- Full error: ${JSON.stringify(response.error)}`, true);
@@ -239,58 +255,38 @@ export const useFlowOperations = (
           return;
         }
         
-        if (errorMessage.includes('Google OAuth') || errorMessage.includes('requiresGoogleAuth')) {
-          const googleAuthMsg = "🔗 Google authentication required. Please sign in with Google.";
-          addDebugInfo(googleAuthMsg, true);
-          setAuthError(googleAuthMsg);
+        if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+          const corsErrorMsg = "🌐 CORS issue detected. Enhanced headers have been applied.";
+          addDebugInfo(corsErrorMsg, true);
           toast({
-            title: "🔴 Google Authentication Required",
-            description: googleAuthMsg,
+            title: "🔴 CORS Error",
+            description: corsErrorMsg,
             variant: "destructive"
           });
           return;
         }
 
-        if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-          const permissionMsg = "🚫 Google permissions denied. Please grant access to Gmail and Drive.";
-          addDebugInfo(permissionMsg, true);
-          setAuthError(permissionMsg);
-          toast({
-            title: "🔴 Permissions Required",
-            description: permissionMsg,
-            variant: "destructive"
-          });
-          return;
-        }
-
-        if (errorMessage.includes('Empty request body')) {
-          addDebugInfo(`💥 Request body transmission failed - payload not sent`, true);
-          toast({
-            title: "🔴 Request Transmission Failed",
-            description: "The request payload was not transmitted properly. Please try again.",
-            variant: "destructive"
-          });
-          return;
-        }
-
-        addDebugInfo(`💥 Unhandled error category: ${errorMessage}`, true);
-
-        // Generic error handling
+        // Generic error handling with request ID
+        const requestId = response.data?.request_id || 'unknown';
         toast({
           title: "🔴 Flow Execution Failed",
-          description: `Error: ${errorMessage}`,
+          description: `Error: ${errorMessage} (Request ID: ${requestId})`,
           variant: "destructive"
         });
         return;
       }
 
-      // Step 8: Success handling
-      addDebugInfo(`✅ === SUCCESS ANALYSIS ===`);
+      // Step 8: Enhanced success handling
+      addDebugInfo(`✅ === ENHANCED SUCCESS ANALYSIS ===`);
       addDebugInfo(`🎉 Flow execution completed successfully!`);
       
       if (response.data) {
-        addDebugInfo(`📊 Success data received`);
+        addDebugInfo(`📊 Enhanced success data received`);
         addDebugInfo(`📋 Response keys: ${Object.keys(response.data).join(', ')}`);
+        
+        if (response.data.request_id) {
+          addDebugInfo(`🔍 Success Request ID: ${response.data.request_id}`);
+        }
         
         if (response.data.message) {
           addDebugInfo(`📝 Response message: ${response.data.message}`);
@@ -299,19 +295,19 @@ export const useFlowOperations = (
 
       toast({
         title: "🎉 Flow Executed Successfully!",
-        description: `${flow.flow_name} has been executed. Check your Google Drive folder.`,
+        description: `${flow.flow_name} has been executed with enhanced CORS support.`,
       });
 
-      addDebugInfo(`🏁 === FLOW EXECUTION COMPLETED SUCCESSFULLY ===`);
+      addDebugInfo(`🏁 === ENHANCED FLOW EXECUTION COMPLETED ===`);
 
     } catch (error) {
-      addDebugInfo(`💥 === UNEXPECTED ERROR ===`, true);
+      addDebugInfo(`💥 === UNEXPECTED ERROR IN ENHANCED VERSION ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
       addDebugInfo(`🔍 Error type: ${error.constructor.name}`, true);
       
       toast({
         title: "🔴 Unexpected Error",
-        description: `An unexpected error occurred: ${error.message}`,
+        description: `Enhanced version error: ${error.message}`,
         variant: "destructive"
       });
     } finally {
