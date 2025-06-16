@@ -27,6 +27,16 @@ export interface FlowExecutionResult {
       timeout_used: number;
       retries_available: number;
     };
+    debugInfo?: {
+      searchQuery?: string;
+      timeFilter?: string;
+      emailDetails?: Array<{
+        subject: string;
+        date: string;
+        attachmentCount: number;
+      }>;
+    };
+    emailsFound?: number;
   };
 }
 
