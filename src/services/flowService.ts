@@ -74,15 +74,17 @@ export class FlowService {
       const payload = {
         action: 'process_gmail_flow',
         userConfig,
+        // Include access_token directly in the payload for edge function to parse
+        access_token: primaryToken,
         googleTokens: {
-          access_token: primaryToken, // Use the OAuth token as access_token
+          access_token: primaryToken,
           refresh_token: googleTokens.refresh_token || '',
           provider_token: googleTokens.provider_token || ''
         },
         debug_info: {
           request_id: `flow-${flowId}-${Date.now()}`,
           supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v4',
+          auth_method: 'body-based-v5',
           timeout_config: 90000,
           request_source: 'edge-function-enhanced-debug',
           token_debug: {
@@ -97,6 +99,7 @@ export class FlowService {
         action: payload.action,
         hasUserConfig: !!payload.userConfig,
         hasGoogleTokens: !!payload.googleTokens,
+        hasAccessToken: !!payload.access_token,
         primaryTokenPresent: !!primaryToken,
         primaryTokenLength: primaryToken?.length || 0,
         payloadSize: JSON.stringify(payload).length
