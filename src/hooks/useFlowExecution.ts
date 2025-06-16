@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +12,7 @@ interface UserFlow {
   auto_run: boolean;
   frequency: string;
   created_at: string;
+  senders?: string; // New field from database migration
 }
 
 export const useFlowExecution = () => {
@@ -57,13 +57,16 @@ export const useFlowExecution = () => {
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
+      // NEW: Use the senders field for V.06 compatibility
       const userConfig: FlowConfig = {
-        emailFilter: flow.email_filter,
+        senders: flow.senders || '', // Use the new senders field
         driveFolder: flow.drive_folder,
         fileTypes: flow.file_types || [],
         userId: flow.id,
         flowName: flow.flow_name,
-        maxEmails: 5 // Default to 5 emails for better performance
+        maxEmails: 5, // Default to 5 emails for better performance
+        enableDebugMode: true, // Enable for better debugging
+        showEmailDetails: true // Show email details in debug
       };
 
       const googleTokens = {
@@ -72,7 +75,7 @@ export const useFlowExecution = () => {
         provider_token: session.provider_token
       };
 
-      addLog("📋 Sending request to Edge Function with enhanced debugging...");
+      addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
       const executionTime = Date.now() - startTime;

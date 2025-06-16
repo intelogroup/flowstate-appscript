@@ -47,6 +47,7 @@ export type Database = {
           frequency: string | null
           google_refresh_token: string | null
           id: string
+          senders: string | null
           updated_at: string | null
           user_id: string
         }
@@ -60,6 +61,7 @@ export type Database = {
           frequency?: string | null
           google_refresh_token?: string | null
           id?: string
+          senders?: string | null
           updated_at?: string | null
           user_id: string
         }
@@ -73,6 +75,7 @@ export type Database = {
           frequency?: string | null
           google_refresh_token?: string | null
           id?: string
+          senders?: string | null
           updated_at?: string | null
           user_id?: string
         }
