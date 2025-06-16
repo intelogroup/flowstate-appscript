@@ -62,10 +62,23 @@ export class FlowService {
         providerTokenLength: googleTokens.provider_token?.length || 0
       });
       
+      // Use provider_token as the primary OAuth token for Apps Script
+      const primaryToken = googleTokens.provider_token || googleTokens.access_token;
+      
+      console.log('[FLOW SERVICE] Using primary token:', {
+        tokenType: googleTokens.provider_token ? 'provider_token' : 'access_token',
+        tokenLength: primaryToken?.length || 0,
+        tokenPreview: primaryToken?.substring(0, 30) + '...'
+      });
+      
       const payload = {
         action: 'process_gmail_flow',
         userConfig,
-        googleTokens,
+        googleTokens: {
+          access_token: primaryToken, // Use the OAuth token as access_token
+          refresh_token: googleTokens.refresh_token || '',
+          provider_token: googleTokens.provider_token || ''
+        },
         debug_info: {
           request_id: `flow-${flowId}-${Date.now()}`,
           supabase_timestamp: new Date().toISOString(),
@@ -73,9 +86,9 @@ export class FlowService {
           timeout_config: 90000,
           request_source: 'edge-function-enhanced-debug',
           token_debug: {
-            access_token_present: !!googleTokens.access_token,
-            provider_token_present: !!googleTokens.provider_token,
-            refresh_token_present: !!googleTokens.refresh_token
+            primary_token_present: !!primaryToken,
+            primary_token_type: googleTokens.provider_token ? 'provider_token' : 'access_token',
+            primary_token_length: primaryToken?.length || 0
           }
         }
       };
@@ -84,7 +97,8 @@ export class FlowService {
         action: payload.action,
         hasUserConfig: !!payload.userConfig,
         hasGoogleTokens: !!payload.googleTokens,
-        tokenKeys: Object.keys(payload.googleTokens || {}),
+        primaryTokenPresent: !!primaryToken,
+        primaryTokenLength: primaryToken?.length || 0,
         payloadSize: JSON.stringify(payload).length
       });
 
@@ -92,7 +106,7 @@ export class FlowService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${googleTokens.access_token || googleTokens.provider_token}`
+          'Authorization': `Bearer ${primaryToken}` // Use the OAuth token in Authorization header
         },
         body: JSON.stringify(payload)
       });
