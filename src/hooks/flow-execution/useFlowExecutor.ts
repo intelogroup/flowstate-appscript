@@ -37,39 +37,43 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       return null;
     }
 
-    // Extract Google OAuth tokens from session
-    const googleAccessToken = session.provider_token; // This is the actual Google OAuth token
-    const supabaseAccessToken = session.access_token; // This is Supabase's JWT token
+    // NEW: Extract Google OAuth token with proper fallback logic
+    // According to Apps Script release notes, the Google OAuth token can be in either location
+    const googleOAuthToken = session.provider_token || session.access_token;
+    const supabaseAccessToken = session.access_token;
     const refreshToken = session.refresh_token;
 
-    console.log('[FLOW EXECUTOR] Token analysis:', {
+    console.log('[FLOW EXECUTOR] Enhanced token analysis:', {
       hasSession: !!session,
       hasUser: !!session.user,
       hasSupabaseToken: !!supabaseAccessToken,
-      hasGoogleToken: !!googleAccessToken,
+      hasProviderToken: !!session.provider_token,
+      hasAccessToken: !!session.access_token,
       hasRefreshToken: !!refreshToken,
       provider: session.user?.app_metadata?.provider,
       isGoogleConnected,
-      // Safe token length checks
-      supabaseTokenLength: supabaseAccessToken?.length || 0,
-      googleTokenLength: googleAccessToken?.length || 0,
+      // Enhanced token analysis
+      providerTokenLength: session.provider_token?.length || 0,
+      accessTokenLength: session.access_token?.length || 0,
       refreshTokenLength: refreshToken?.length || 0,
+      // Which token we're using as Google OAuth
+      usingProviderToken: !!session.provider_token,
+      usingAccessTokenFallback: !session.provider_token && !!session.access_token,
       // Safe token previews for debugging
-      supabaseTokenStart: supabaseAccessToken?.substring(0, 20) || 'none',
-      googleTokenStart: googleAccessToken?.substring(0, 20) || 'none'
+      providerTokenStart: session.provider_token?.substring(0, 20) || 'none',
+      accessTokenStart: session.access_token?.substring(0, 20) || 'none',
+      selectedGoogleTokenStart: googleOAuthToken?.substring(0, 20) || 'none'
     });
 
-    // For Google Apps Script, we need the Google OAuth token, not Supabase JWT
-    if (!googleAccessToken) {
-      const errorMsg = "Google OAuth token not found. Please refresh your authentication.";
+    if (!googleOAuthToken) {
+      const errorMsg = "Google OAuth token not found in either provider_token or access_token. Please refresh your authentication.";
       addLog(errorMsg, true);
       addLog("🔧 Attempting to refresh session automatically...", false);
       
-      // Try to refresh session automatically
       try {
         await refreshSession();
         // After refresh, check again
-        const newGoogleToken = session?.provider_token;
+        const newGoogleToken = session?.provider_token || session?.access_token;
         
         if (!newGoogleToken) {
           toast({
@@ -92,8 +96,8 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
 
     const startTime = Date.now();
     addLog(`🚀 Starting execution for flow: ${flow.flow_name}`);
-    addLog(`🔑 Using Google OAuth token: ${!!googleAccessToken} (${googleAccessToken?.length || 0} chars)`);
-    addLog(`📊 Token source: ${googleAccessToken ? 'provider_token (Google OAuth)' : 'access_token fallback'}`);
+    addLog(`🔑 Using Google OAuth token: ${!!googleOAuthToken} (${googleOAuthToken?.length || 0} chars)`);
+    addLog(`📊 Token source: ${session.provider_token ? 'provider_token (Google OAuth)' : 'access_token (fallback Google OAuth)'}`);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
@@ -109,11 +113,11 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         showEmailDetails: true // Show email details in debug
       };
 
-      // Use the actual Google OAuth token for Apps Script
+      // Use the correct Google OAuth token for Apps Script
       const googleTokens = {
-        access_token: googleAccessToken || '', // Use Google OAuth token
+        access_token: googleOAuthToken || '', // Use the Google OAuth token we found
         refresh_token: refreshToken || '',
-        provider_token: googleAccessToken || '' // Same as access_token for Google
+        provider_token: googleOAuthToken || '' // Same as access_token for consistency
       };
 
       addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
