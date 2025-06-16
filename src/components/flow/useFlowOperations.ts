@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -106,8 +105,8 @@ export const useFlowOperations = (
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
       addDebugInfo(`📋 Payload size: ${JSON.stringify(requestPayload).length} characters`);
 
-      // Step 5: Primary method with fixed payload transmission
-      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke with fixed payload");
+      // Step 5: Enhanced primary method with better error handling
+      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke with enhanced error handling");
       let response;
       let attemptMethod = "primary";
       
@@ -120,10 +119,10 @@ export const useFlowOperations = (
           body: requestPayload,
           headers: {
             'Content-Type': 'application/json',
-            'X-Debug-Source': 'flowmanager-primary-fixed',
-            'X-User-Agent': 'FlowState-WebApp/3.0',
+            'X-Debug-Source': 'flowmanager-primary-v4',
+            'X-User-Agent': 'FlowState-WebApp/4.0',
             'X-Flow-ID': flow.id,
-            'X-Request-Source': 'web-client-fixed'
+            'X-Request-Source': 'web-client-v4'
           }
         });
         const invokeEndTime = performance.now();
@@ -137,6 +136,13 @@ export const useFlowOperations = (
           addDebugInfo(`  - Error type: ${typeof response.error}`, true);
           addDebugInfo(`  - Error message: ${response.error.message || 'No message'}`, true);
           addDebugInfo(`  - Error name: ${response.error.name || 'Unknown'}`, true);
+          addDebugInfo(`  - Error context: ${JSON.stringify(response.error.context || {})}`, true);
+
+          // Check if this is a network-level error (FunctionsFetchError)
+          if (response.error.name === 'FunctionsFetchError') {
+            addDebugInfo(`🔄 Network error detected, trying fallback method immediately`, true);
+            throw new Error(`Network error: ${response.error.message}`);
+          }
         } else {
           addDebugInfo(`✅ Primary method success data:`);
           addDebugInfo(`  - Data keys: ${response.data ? Object.keys(response.data).join(', ') : 'No data'}`);
@@ -147,8 +153,8 @@ export const useFlowOperations = (
         addDebugInfo(`  - Error name: ${invokeError.name}`, true);
         addDebugInfo(`  - Error message: ${invokeError.message}`, true);
         
-        // Step 6: Enhanced fallback method with proper payload
-        addDebugInfo("📋 Step 6: Enhanced fallback method - direct fetch with payload");
+        // Step 6: Enhanced fallback method with direct URL and better error handling
+        addDebugInfo("📋 Step 6: Enhanced fallback method - direct fetch with full URL");
         attemptMethod = "fallback";
         
         try {
@@ -161,12 +167,12 @@ export const useFlowOperations = (
               ...requestPayload.debug_info,
               fallback_attempt: true,
               primary_error: invokeError.message,
-              method: 'direct_fetch_fixed',
+              method: 'direct_fetch_v4',
               attempt_number: 2
             }
           };
 
-          addDebugInfo("📤 Making direct fetch request with payload...");
+          addDebugInfo("📤 Making direct fetch request with full URL...");
           addDebugInfo(`📋 Fallback payload size: ${JSON.stringify(fallbackPayload).length} characters`);
           
           const fetchStartTime = performance.now();
@@ -177,10 +183,10 @@ export const useFlowOperations = (
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
               'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-              'X-Debug-Source': 'flowmanager-fallback-fixed',
-              'X-User-Agent': 'FlowState-WebApp/3.0',
+              'X-Debug-Source': 'flowmanager-fallback-v4',
+              'X-User-Agent': 'FlowState-WebApp/4.0',
               'X-Flow-ID': flow.id,
-              'X-Request-Source': 'web-client-fallback-fixed'
+              'X-Request-Source': 'web-client-fallback-v4'
             },
             body: JSON.stringify(fallbackPayload)
           });
@@ -192,12 +198,14 @@ export const useFlowOperations = (
           let responseData;
           const responseText = await fetchResponse.text();
           addDebugInfo(`📄 Raw response length: ${responseText.length} chars`);
+          addDebugInfo(`📄 Raw response preview: ${responseText.substring(0, 200)}...`);
           
           try {
             responseData = JSON.parse(responseText);
             addDebugInfo(`✅ Successfully parsed JSON response`);
           } catch (jsonError) {
             addDebugInfo(`❌ Failed to parse JSON: ${jsonError.message}`, true);
+            addDebugInfo(`❌ Response text: ${responseText}`, true);
             throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`);
           }
 
@@ -216,7 +224,15 @@ export const useFlowOperations = (
         } catch (fetchError) {
           addDebugInfo(`💥 Fallback method also failed:`, true);
           addDebugInfo(`  - Error message: ${fetchError.message}`, true);
-          throw fetchError;
+          addDebugInfo(`  - Error name: ${fetchError.name}`, true);
+          
+          // If both methods fail, provide helpful error message
+          toast({
+            title: "🔴 Network Connection Error",
+            description: "Both primary and fallback methods failed. Please check your internet connection and try again.",
+            variant: "destructive"
+          });
+          return;
         }
       }
 
@@ -303,6 +319,7 @@ export const useFlowOperations = (
     } catch (error) {
       addDebugInfo(`💥 === UNEXPECTED ERROR ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
+      addDebugInfo(`🔍 Error name: ${error.name}`, true);
       
       toast({
         title: "🔴 Unexpected Error",

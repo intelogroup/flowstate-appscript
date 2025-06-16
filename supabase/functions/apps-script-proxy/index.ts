@@ -4,7 +4,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-debug-source, x-user-agent',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-debug-source, x-user-agent, x-flow-id, x-request-source',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS'
 }
 
 // Enhanced logging function
@@ -21,13 +22,13 @@ serve(async (req) => {
   const requestId = crypto.randomUUID().substring(0, 8);
   logWithTimestamp('INFO', `=== REQUEST START [${requestId}] ===`);
   
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    logWithTimestamp('INFO', `CORS preflight request handled [${requestId}]`);
-    return new Response('ok', { headers: corsHeaders })
-  }
-
   try {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      logWithTimestamp('INFO', `CORS preflight request handled [${requestId}]`);
+      return new Response('ok', { headers: corsHeaders })
+    }
+
     logWithTimestamp('INFO', `Processing ${req.method} request to ${req.url} [${requestId}]`);
     
     // Log all request headers for debugging
@@ -83,7 +84,9 @@ serve(async (req) => {
             debug: {
               content_length: req.headers.get('content-length'),
               content_type: req.headers.get('content-type'),
-              body_length: bodyText.length
+              body_length: bodyText.length,
+              method: req.method,
+              url: req.url
             }
           }),
           { 
@@ -325,7 +328,7 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '3.0-fixed-payload',
+          edge_function_version: '4.0-network-fixed',
           flow_id: flowConfig.id,
           original_debug_info: requestBody.debug_info || {}
         }
@@ -354,30 +357,35 @@ serve(async (req) => {
 
         logWithTimestamp('INFO', `Apps Script response [${requestId}]:`, {
           status: appsScriptResponse.status,
-          ok: appsScriptResponse.ok
+          ok: appsScriptResponse.ok,
+          statusText: appsScriptResponse.statusText
         });
 
         if (!appsScriptResponse.ok) {
           const errorText = await appsScriptResponse.text();
           logWithTimestamp('ERROR', `Apps Script error [${requestId}]:`, {
             status: appsScriptResponse.status,
+            statusText: appsScriptResponse.statusText,
             error_text: errorText
           });
           
           return new Response(
             JSON.stringify({ 
-              error: `Apps Script error: ${errorText}`,
-              request_id: requestId
+              error: `Apps Script error (${appsScriptResponse.status}): ${errorText}`,
+              request_id: requestId,
+              apps_script_status: appsScriptResponse.status
             }),
             { 
-              status: 500, 
+              status: 502, 
               headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
             }
           )
         }
 
         const result = await appsScriptResponse.json();
-        logWithTimestamp('SUCCESS', `Apps Script success [${requestId}]`);
+        logWithTimestamp('SUCCESS', `Apps Script success [${requestId}]`, {
+          result_keys: Object.keys(result || {})
+        });
         
         return new Response(
           JSON.stringify({
@@ -393,17 +401,20 @@ serve(async (req) => {
 
       } catch (fetchError) {
         logWithTimestamp('ERROR', `Apps Script fetch failed [${requestId}]:`, {
-          error: fetchError.message
+          error: fetchError.message,
+          error_name: fetchError.name,
+          error_stack: fetchError.stack
         });
         
         return new Response(
           JSON.stringify({ 
             error: 'Failed to call Apps Script',
             details: fetchError.message,
+            error_type: fetchError.name,
             request_id: requestId
           }),
           { 
-            status: 500, 
+            status: 502, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
           }
         )
@@ -444,13 +455,15 @@ serve(async (req) => {
   } catch (error) {
     logWithTimestamp('ERROR', `=== UNEXPECTED ERROR [${requestId}] ===`, {
       error_message: error.message,
-      error_name: error.name
+      error_name: error.name,
+      error_stack: error.stack
     });
     
     return new Response(
       JSON.stringify({ 
         error: 'Internal server error',
         details: error.message,
+        error_type: error.name,
         request_id: requestId
       }),
       { 
