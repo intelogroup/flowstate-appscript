@@ -1,15 +1,17 @@
 
 import React from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFlowManagement } from '@/hooks/useFlowManagement';
 import { useFlowExecution } from '@/hooks/useFlowExecution';
 
-// Import the existing components
+// Import the refactored components
 import DebugPanel from './flow/DebugPanel';
 import AuthStatusAlert from './flow/AuthStatusAlert';
-import FlowCard from './flow/FlowCard';
 import EmptyFlowsMessage from './flow/EmptyFlowsMessage';
+import FlowManagerHeader from './flow/FlowManagerHeader';
+import LoadingState from './flow/LoadingState';
+import FlowList from './flow/FlowList';
 
 const FlowManager = React.memo(() => {
   const { session } = useAuth();
@@ -41,19 +43,7 @@ const FlowManager = React.memo(() => {
   }, [executionLogs]);
 
   if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Your Flows</CardTitle>
-          <CardDescription>Loading your Gmail to Drive flows...</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center p-8">
-            <div className="w-8 h-8 bg-blue-600 rounded-full animate-pulse"></div>
-          </div>
-        </CardContent>
-      </Card>
-    );
+    return <LoadingState />;
   }
 
   return (
@@ -66,10 +56,7 @@ const FlowManager = React.memo(() => {
       />
 
       <Card>
-        <CardHeader>
-          <CardTitle>Your Flows</CardTitle>
-          <CardDescription>Manage and execute your Gmail to Drive flows</CardDescription>
-        </CardHeader>
+        <FlowManagerHeader />
         <CardContent className="space-y-4">
           {/* Authentication Status */}
           <AuthStatusAlert 
@@ -80,16 +67,13 @@ const FlowManager = React.memo(() => {
           {!userFlows || userFlows.length === 0 ? (
             <EmptyFlowsMessage hasGoogleAuth={hasGoogleAuth} />
           ) : (
-            userFlows.map((flow) => (
-              <FlowCard
-                key={flow.id}
-                flow={flow}
-                isRunning={runningFlows.has(flow.id)}
-                hasGoogleAuth={hasGoogleAuth}
-                onRun={handleRunFlow}
-                onDelete={handleDeleteFlow}
-              />
-            ))
+            <FlowList
+              flows={userFlows}
+              runningFlows={runningFlows}
+              hasGoogleAuth={hasGoogleAuth}
+              onRun={handleRunFlow}
+              onDelete={handleDeleteFlow}
+            />
           )}
         </CardContent>
       </Card>
