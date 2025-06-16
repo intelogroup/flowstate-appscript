@@ -12,11 +12,12 @@ import EmptyFlowsMessage from './flow/EmptyFlowsMessage';
 import FlowManagerHeader from './flow/FlowManagerHeader';
 import LoadingState from './flow/LoadingState';
 import FlowList from './flow/FlowList';
+import PerformanceMonitor from './flow/PerformanceMonitor';
 
 const FlowManager = React.memo(() => {
   const { session } = useAuth();
   const { userFlows, isLoading, deleteFlow } = useFlowManagement();
-  const { runningFlows, executionLogs, executeFlow, clearLogs } = useFlowExecution();
+  const { runningFlows, executionLogs, executeFlow, clearLogs, checkConnectivity } = useFlowExecution();
 
   // Check if user has Google authentication
   const hasGoogleAuth = !!(session?.provider_token || session?.access_token);
@@ -48,6 +49,12 @@ const FlowManager = React.memo(() => {
 
   return (
     <div className="space-y-6">
+      {/* Performance Monitor */}
+      <PerformanceMonitor 
+        onHealthCheck={checkConnectivity}
+        executionLogs={executionLogs}
+      />
+
       {/* Debug Information Panel */}
       <DebugPanel 
         debugInfo={executionLogs}

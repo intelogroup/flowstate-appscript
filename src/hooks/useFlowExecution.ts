@@ -21,9 +21,14 @@ export const useFlowExecution = () => {
   const { toast } = useToast();
   const { user, session } = useAuth();
 
-  const addLog = useCallback((message: string, isError: boolean = false) => {
+  const addLog = useCallback((message: string, isError: boolean = false, performanceData?: any) => {
     const timestamp = new Date().toLocaleTimeString();
-    const logMessage = `[${timestamp}] ${message}`;
+    let logMessage = `[${timestamp}] ${message}`;
+    
+    // Add performance data if available
+    if (performanceData) {
+      logMessage += ` (Duration: ${performanceData.duration || 'unknown'}ms)`;
+    }
     
     console.log(`[FLOW EXECUTION] ${logMessage}`);
     setExecutionLogs(prev => [...prev.slice(-19), logMessage]);
@@ -47,6 +52,7 @@ export const useFlowExecution = () => {
       return null;
     }
 
+    const startTime = Date.now();
     addLog(`🚀 Starting execution for flow: ${flow.flow_name}`);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
@@ -57,7 +63,7 @@ export const useFlowExecution = () => {
         fileTypes: flow.file_types || [],
         userId: flow.id,
         flowName: flow.flow_name,
-        maxEmails: 5
+        maxEmails: 5 // Default to 5 emails for better performance
       };
 
       const googleTokens = {
@@ -66,13 +72,16 @@ export const useFlowExecution = () => {
         provider_token: session.provider_token
       };
 
-      addLog("📋 Sending request to Edge Function...");
+      addLog("📋 Sending request to Edge Function with enhanced timeout handling...");
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
-      addLog("✅ Flow execution completed successfully");
+      const executionTime = Date.now() - startTime;
+      addLog("✅ Flow execution completed successfully", false, { duration: executionTime });
       
       if (result.data && result.data.attachments > 0) {
-        addLog(`🎉 Processed ${result.data.attachments} attachments successfully`);
+        const perfInfo = result.data.performance_metrics ? 
+          ` (Total time: ${Math.round(result.data.performance_metrics.total_duration / 1000)}s)` : '';
+        addLog(`🎉 Processed ${result.data.attachments} attachments successfully${perfInfo}`);
         toast({
           title: "🎉 Flow Executed Successfully!",
           description: `${flow.flow_name} processed ${result.data.attachments} attachments.`,
@@ -85,16 +94,35 @@ export const useFlowExecution = () => {
         });
       }
 
+      // Log performance metrics if available
+      if (result.data?.performance_metrics) {
+        const perf = result.data.performance_metrics;
+        addLog(`📊 Performance: ${Math.round(perf.total_duration / 1000)}s total, timeout was ${Math.round(perf.timeout_used / 1000)}s`);
+      }
+
       return result;
     } catch (error) {
+      const executionTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      addLog(`❌ Flow execution failed: ${errorMessage}`, true);
       
-      toast({
-        title: "🔴 Flow Execution Failed",
-        description: errorMessage,
-        variant: "destructive"
-      });
+      // Enhanced error handling for timeouts
+      if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+        addLog(`⏱️ Flow timed out after ${Math.round(executionTime / 1000)}s - consider reducing email count`, true);
+        toast({
+          title: "⏱️ Flow Timeout",
+          description: "The flow took too long to complete. Try processing fewer emails at once.",
+          variant: "destructive"
+        });
+      } else {
+        addLog(`❌ Flow execution failed: ${errorMessage}`, true, { duration: executionTime });
+        toast({
+          title: "🔴 Flow Execution Failed",
+          description: errorMessage.length > 100 ? 
+            errorMessage.substring(0, 100) + "..." : 
+            errorMessage,
+          variant: "destructive"
+        });
+      }
       
       return null;
     } finally {
@@ -114,11 +142,38 @@ export const useFlowExecution = () => {
     });
   }, [toast]);
 
+  // Health check for Apps Script connectivity
+  const checkConnectivity = useCallback(async () => {
+    addLog("🔍 Checking Apps Script connectivity...");
+    try {
+      const isHealthy = await FlowService.checkAppsScriptHealth();
+      if (isHealthy) {
+        addLog("✅ Apps Script connection is healthy");
+        toast({
+          title: "✅ Connection Healthy",
+          description: "Apps Script endpoint is responding normally.",
+        });
+      } else {
+        addLog("⚠️ Apps Script health check failed", true);
+        toast({
+          title: "⚠️ Connection Issues",
+          description: "Apps Script endpoint may be experiencing issues.",
+          variant: "destructive"
+        });
+      }
+      return isHealthy;
+    } catch (error) {
+      addLog("❌ Health check error: " + (error instanceof Error ? error.message : 'Unknown error'), true);
+      return false;
+    }
+  }, [addLog, toast]);
+
   return {
     runningFlows,
     executionLogs,
     executeFlow,
     clearLogs,
-    addLog
+    addLog,
+    checkConnectivity
   };
 };

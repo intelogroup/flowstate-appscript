@@ -9,6 +9,7 @@ interface FlowConfig {
   fileTypes?: string[]
   userId?: string
   flowName?: string
+  maxEmails?: number
 }
 
 interface RequestBody {
@@ -20,8 +21,127 @@ interface RequestBody {
   debug_info?: any
 }
 
+// Enhanced timeout configuration
+const TIMEOUT_CONFIG = {
+  default: 60000,     // 60 seconds for normal operations
+  gmail_flow: 90000,  // 90 seconds for Gmail processing
+  simple: 30000       // 30 seconds for simple operations
+}
+
+// Retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  baseDelay: 2000,    // 2 seconds
+  maxDelay: 10000     // 10 seconds max
+}
+
+async function callAppsScriptWithRetry(
+  url: string, 
+  payload: any, 
+  debugInfo: any, 
+  timeoutMs: number = TIMEOUT_CONFIG.default
+): Promise<Response> {
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      logNetworkEvent('RETRY_ATTEMPT', {
+        attempt,
+        timeout: timeoutMs,
+        request_id: debugInfo.request_id
+      });
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        logNetworkEvent('TIMEOUT_TRIGGERED', {
+          attempt,
+          timeout: timeoutMs,
+          request_id: debugInfo.request_id
+        });
+        controller.abort();
+      }, timeoutMs);
+
+      const startTime = Date.now();
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Supabase-Edge-Function/3.1',
+          'X-Request-ID': debugInfo.request_id,
+          'X-Attempt': attempt.toString()
+        },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      
+      const duration = Date.now() - startTime;
+      logNetworkEvent('REQUEST_SUCCESS', {
+        attempt,
+        duration,
+        status: response.status,
+        request_id: debugInfo.request_id
+      });
+
+      return response;
+
+    } catch (error) {
+      lastError = error;
+      const duration = Date.now() - performance.now();
+      
+      logNetworkEvent('REQUEST_FAILED', {
+        attempt,
+        error: error.message,
+        errorName: error.name,
+        duration,
+        request_id: debugInfo.request_id
+      });
+
+      // If it's an AbortError (timeout) and we have retries left
+      if (error.name === 'AbortError' && attempt < RETRY_CONFIG.maxRetries) {
+        const delay = Math.min(
+          RETRY_CONFIG.baseDelay * Math.pow(2, attempt - 1),
+          RETRY_CONFIG.maxDelay
+        );
+        
+        logNetworkEvent('RETRY_DELAY', {
+          attempt,
+          delay,
+          nextAttempt: attempt + 1,
+          request_id: debugInfo.request_id
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // For non-timeout errors or final attempt, throw immediately
+      throw error;
+    }
+  }
+  
+  throw lastError;
+}
+
+function getTimeoutForOperation(action: string, userConfig?: FlowConfig): number {
+  if (action === 'process_gmail_flow' || action === 'run_flow') {
+    const emailCount = userConfig?.maxEmails || 5;
+    // Dynamic timeout based on email count: 60s base + 10s per email (max 180s)
+    return Math.min(
+      TIMEOUT_CONFIG.gmail_flow + (emailCount * 10000),
+      180000
+    );
+  }
+  
+  return TIMEOUT_CONFIG.default;
+}
+
 serve(async (req) => {
   const debugInfo = extractDebugInfo(req);
+  const startTime = Date.now();
   logNetworkEvent('REQUEST_RECEIVED', debugInfo);
 
   // Enhanced CORS preflight handling
@@ -123,6 +243,7 @@ serve(async (req) => {
         hasAccessToken: !!originalPayload.access_token,
         hasUserConfig: !!originalPayload.userConfig,
         flowName: originalPayload.userConfig?.flowName,
+        maxEmails: originalPayload.userConfig?.maxEmails,
         request_id: debugInfo.request_id
       });
     } catch (error) {
@@ -155,30 +276,27 @@ serve(async (req) => {
       }, 400);
     }
 
-    // FIXED: Create proper Apps Script payload format (no nesting)
+    // Create proper Apps Script payload format
     let bodyForGas;
     
     if (originalPayload.action === 'run_flow') {
       // Convert run_flow to the format Apps Script expects
       bodyForGas = {
-        auth_token: appsScriptSecret,  // Apps Script expects this key name
-        action: 'process_gmail_flow',   // Apps Script expects this action
-        userConfig: originalPayload.userConfig || {
-          emailFilter: 'has:attachment',
-          driveFolder: 'Email Attachments',
-          fileTypes: [],
-          userId: 'unknown',
-          flowName: 'Default Flow'
+        auth_token: appsScriptSecret,
+        action: 'process_gmail_flow',
+        userConfig: {
+          ...originalPayload.userConfig,
+          maxEmails: originalPayload.userConfig?.maxEmails || 5
         },
         googleTokens: originalPayload.googleTokens || null,
         debug_info: {
           ...debugInfo,
           supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v3'
+          auth_method: 'body-based-v3',
+          timeout_config: getTimeoutForOperation(originalPayload.action, originalPayload.userConfig)
         }
       };
     } else if (originalPayload.action === 'set_flow') {
-      // Handle set_flow action
       bodyForGas = {
         auth_token: appsScriptSecret,
         action: 'set_flow',
@@ -190,7 +308,6 @@ serve(async (req) => {
         }
       };
     } else {
-      // Handle other actions - pass through with proper auth token
       bodyForGas = {
         auth_token: appsScriptSecret,
         ...originalPayload,
@@ -202,52 +319,52 @@ serve(async (req) => {
       };
     }
 
+    // Determine appropriate timeout
+    const timeoutMs = getTimeoutForOperation(bodyForGas.action, bodyForGas.userConfig);
+
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
       action: bodyForGas.action,
       hasAuthToken: !!bodyForGas.auth_token,
       hasUserConfig: !!bodyForGas.userConfig,
       request_id: debugInfo.request_id,
-      payload_size: JSON.stringify(bodyForGas).length
+      payload_size: JSON.stringify(bodyForGas).length,
+      timeout: timeoutMs,
+      maxEmails: bodyForGas.userConfig?.maxEmails
     });
 
-    // Enhanced fetch with timeout and retry logic
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
+    // Call Apps Script with retry logic
     let response;
     try {
-      response = await fetch(appsScriptUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Supabase-Edge-Function/3.0',
-          'X-Request-ID': debugInfo.request_id
-        },
-        body: JSON.stringify(bodyForGas),
-        redirect: 'follow',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      response = await callAppsScriptWithRetry(appsScriptUrl, bodyForGas, debugInfo, timeoutMs);
     } catch (fetchError) {
-      clearTimeout(timeoutId);
-      logNetworkEvent('FETCH_ERROR', { 
+      logNetworkEvent('FINAL_FETCH_ERROR', { 
         error: fetchError.message,
         name: fetchError.name,
-        request_id: debugInfo.request_id
+        request_id: debugInfo.request_id,
+        total_duration: Date.now() - startTime
       });
       
       if (fetchError.name === 'AbortError') {
         return createCorsResponse({
-          error: 'Apps Script request timeout (30s)',
+          error: `Apps Script request timeout (${timeoutMs/1000}s) after ${RETRY_CONFIG.maxRetries} attempts`,
           request_id: debugInfo.request_id,
+          timeout_ms: timeoutMs,
+          retries_attempted: RETRY_CONFIG.maxRetries,
           troubleshooting: {
-            message: 'The request to Google Apps Script timed out',
+            message: 'The request to Google Apps Script timed out after multiple attempts',
             steps: [
-              '1. Check if your Apps Script deployment is responding',
-              '2. Verify the APPS_SCRIPT_URL is correct',
-              '3. Try again in a few minutes'
+              '1. Your Gmail flow is processing too many emails at once',
+              '2. Try reducing the maxEmails parameter in your flow configuration',
+              '3. Check if your Apps Script deployment is responding normally',
+              '4. Consider processing emails in smaller batches',
+              '5. Verify the APPS_SCRIPT_URL is correct and accessible'
             ]
+          },
+          performance_hints: {
+            current_timeout: `${timeoutMs/1000}s`,
+            email_count: bodyForGas.userConfig?.maxEmails || 'unknown',
+            suggested_max_emails: Math.max(1, Math.floor((bodyForGas.userConfig?.maxEmails || 5) / 2))
           }
         }, 504);
       }
@@ -255,11 +372,13 @@ serve(async (req) => {
       throw fetchError;
     }
 
+    const totalDuration = Date.now() - startTime;
     logNetworkEvent('APPS_SCRIPT_RESPONSE', {
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
-      request_id: debugInfo.request_id
+      request_id: debugInfo.request_id,
+      total_duration: totalDuration
     });
 
     if (!response.ok) {
@@ -268,7 +387,8 @@ serve(async (req) => {
         status: response.status,
         statusText: response.statusText,
         body: responseText.substring(0, 500),
-        request_id: debugInfo.request_id
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration
       });
 
       const isHtmlResponse = responseText.trim().startsWith('<!DOCTYPE') || 
@@ -282,6 +402,7 @@ serve(async (req) => {
         }`,
         request_id: debugInfo.request_id,
         apps_script_status: response.status,
+        total_duration: totalDuration,
         troubleshooting: {
           message: isHtmlResponse 
             ? 'Apps Script deployment needs proper access settings'
@@ -316,17 +437,24 @@ serve(async (req) => {
         message: appsScriptData.message,
         dataKeys: Object.keys(appsScriptData.data || {}),
         attachments: appsScriptData.data?.attachments || 0,
-        request_id: debugInfo.request_id
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration,
+        performance_metrics: {
+          edge_function_duration: totalDuration,
+          apps_script_processing: appsScriptData.data?.processing_time || 'unknown'
+        }
       });
     } catch (error) {
       logNetworkEvent('RESPONSE_PARSE_ERROR', { 
         error: error.message, 
-        request_id: debugInfo.request_id 
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration
       });
       return createCorsResponse({
         error: 'Apps Script returned invalid JSON',
         details: error.message,
-        request_id: debugInfo.request_id
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration
       }, 502);
     }
 
@@ -337,16 +465,23 @@ serve(async (req) => {
       timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
       auth_method: 'body-based-v3',
+      performance_metrics: {
+        total_duration: totalDuration,
+        timeout_used: timeoutMs,
+        retries_available: RETRY_CONFIG.maxRetries
+      },
       debug_info: debugInfo,
       apps_script_response: appsScriptData
     }, 200);
 
   } catch (error) {
+    const totalDuration = Date.now() - startTime;
     logNetworkEvent('EDGE_FUNCTION_ERROR', { 
       error: error.message,
       name: error.constructor.name,
       stack: error.stack?.substring(0, 500),
-      request_id: debugInfo.request_id
+      request_id: debugInfo.request_id,
+      total_duration: totalDuration
     });
     
     return createCorsResponse({
@@ -354,6 +489,7 @@ serve(async (req) => {
       message: error.message,
       timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
+      total_duration: totalDuration,
       retryable: (error as any).retryable !== false
     }, 500);
   }
