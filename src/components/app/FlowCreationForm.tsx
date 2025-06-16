@@ -73,7 +73,7 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
           rows={3}
         />
         <p className="text-sm text-gray-500">
-          Use Gmail search syntax to define which emails to process
+          Use Gmail search syntax to define which emails to process (from the last hour)
         </p>
       </div>
 
@@ -110,7 +110,7 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         <div className="space-y-1">
           <Label>Auto-run Flow</Label>
           <p className="text-sm text-gray-500">
-            Automatically process new emails
+            Automatically process new emails from the last hour
           </p>
         </div>
         <Switch
@@ -151,7 +151,7 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
       </Button>
 
       <p className="text-center text-sm text-gray-500">
-        Your flow will be securely stored and executed using Google Apps Script
+        Your flow will process emails from the last hour automatically
       </p>
     </div>
   );
