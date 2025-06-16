@@ -30,23 +30,39 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Check if user has Google authentication with valid tokens
+  // Enhanced Google connection check with detailed logging
   const isGoogleConnected = useMemo(() => {
-    if (!session || !session.user) return false;
+    if (!session || !session.user) {
+      console.log('[AUTH] No session or user available');
+      return false;
+    }
     
     const hasGoogleProvider = session.user.app_metadata?.provider === 'google';
     const hasProviderToken = !!session.provider_token;
     const hasAccessToken = !!session.access_token;
     
-    console.log('[AUTH] Google connection check:', {
+    console.log('[AUTH] Google connection detailed check:', {
       hasGoogleProvider,
       hasProviderToken,
       hasAccessToken,
       provider: session.user.app_metadata?.provider,
-      tokenPresent: !!session.provider_token
+      providerTokenLength: session.provider_token?.length || 0,
+      accessTokenLength: session.access_token?.length || 0,
+      sessionKeys: Object.keys(session),
+      // Log first 20 chars of tokens for debugging (safe)
+      providerTokenStart: session.provider_token?.substring(0, 20) || 'none',
+      accessTokenStart: session.access_token?.substring(0, 20) || 'none'
     });
     
-    return hasGoogleProvider && (hasProviderToken || hasAccessToken);
+    // For Google OAuth, we need either provider_token or access_token
+    const isConnected = hasGoogleProvider && (hasProviderToken || hasAccessToken);
+    
+    if (!isConnected && hasGoogleProvider) {
+      console.warn('[AUTH] Google provider detected but missing OAuth tokens');
+      setAuthError('Google authentication incomplete - missing OAuth tokens. Please sign in again.');
+    }
+    
+    return isConnected;
   }, [session]);
 
   const signInWithGoogle = useCallback(async () => {
@@ -54,19 +70,31 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
       setAuthError(null);
       setLoading(true);
       
-      console.log('[AUTH] Starting Google OAuth sign-in...');
+      console.log('[AUTH] Starting Google OAuth sign-in with enhanced scopes...');
       
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/app`,
-          scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file'
+          scopes: [
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/drive.file',
+            'openid',
+            'email',
+            'profile'
+          ].join(' '),
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent'
+          }
         }
       });
 
       if (error) {
         console.error('[AUTH] Google OAuth error:', error);
-        setAuthError(error.message);
+        setAuthError(`Google sign-in failed: ${error.message}`);
+      } else {
+        console.log('[AUTH] Google OAuth initiated successfully');
       }
     } catch (error) {
       console.error('[AUTH] Unexpected error during Google sign-in:', error);
@@ -90,10 +118,16 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
       
       if (data.session) {
         console.log('[AUTH] Session refreshed successfully');
-        console.log('[AUTH] New session tokens:', {
+        console.log('[AUTH] Refreshed session tokens:', {
           hasAccessToken: !!data.session.access_token,
           hasProviderToken: !!data.session.provider_token,
-          hasRefreshToken: !!data.session.refresh_token
+          hasRefreshToken: !!data.session.refresh_token,
+          provider: data.session.user?.app_metadata?.provider,
+          tokenLengths: {
+            access: data.session.access_token?.length || 0,
+            provider: data.session.provider_token?.length || 0,
+            refresh: data.session.refresh_token?.length || 0
+          }
         });
         setSession(data.session);
         setUser(data.session.user);
@@ -123,28 +157,43 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
   useEffect(() => {
     let mounted = true;
 
-    // Set up auth state listener
+    // Set up auth state listener with enhanced token debugging
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (!mounted) return;
 
         console.log('[AUTH] Auth state change:', event);
-        console.log('[AUTH] Session details:', {
+        console.log('[AUTH] Session detailed analysis:', {
           hasSession: !!session,
           hasUser: !!session?.user,
           provider: session?.user?.app_metadata?.provider,
           hasAccessToken: !!session?.access_token,
           hasProviderToken: !!session?.provider_token,
-          hasRefreshToken: !!session?.refresh_token
+          hasRefreshToken: !!session?.refresh_token,
+          sessionKeys: session ? Object.keys(session) : [],
+          userKeys: session?.user ? Object.keys(session.user) : [],
+          // Safe token previews for debugging
+          accessTokenPreview: session?.access_token?.substring(0, 20) || 'none',
+          providerTokenPreview: session?.provider_token?.substring(0, 20) || 'none'
         });
         
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Clear any auth errors on successful sign in
+        // Enhanced auth event handling
         if (event === 'SIGNED_IN' && session) {
           setAuthError(null);
           console.log('[AUTH] User signed in successfully');
+          
+          // Validate Google OAuth tokens immediately after sign-in
+          if (session.user?.app_metadata?.provider === 'google') {
+            if (!session.provider_token && !session.access_token) {
+              console.error('[AUTH] Google sign-in completed but missing OAuth tokens!');
+              setAuthError('Google authentication incomplete - missing access tokens. Please try signing in again.');
+            } else {
+              console.log('[AUTH] Google OAuth tokens validated successfully');
+            }
+          }
         }
         
         if (event === 'SIGNED_OUT') {
@@ -164,7 +213,7 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
       }
     );
 
-    // Check for existing session
+    // Check for existing session with enhanced debugging
     const initializeAuth = async () => {
       try {
         console.log('[AUTH] Initializing auth...');
@@ -179,20 +228,31 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
           return;
         }
 
-        console.log('[AUTH] Initial session check:', {
+        console.log('[AUTH] Initial session comprehensive check:', {
           hasSession: !!session,
           provider: session?.user?.app_metadata?.provider,
-          hasTokens: !!(session?.access_token || session?.provider_token)
+          hasAccessToken: !!session?.access_token,
+          hasProviderToken: !!session?.provider_token,
+          hasRefreshToken: !!session?.refresh_token,
+          expiresAt: session?.expires_at,
+          tokenTypes: session ? Object.keys(session).filter(key => key.includes('token')) : [],
+          // Preview tokens safely
+          accessTokenStart: session?.access_token?.substring(0, 20) || 'none',
+          providerTokenStart: session?.provider_token?.substring(0, 20) || 'none'
         });
         
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
 
-        // If we have a session but missing Google tokens, show error
-        if (session && session.user?.app_metadata?.provider === 'google' && !session.provider_token && !session.access_token) {
-          console.warn('[AUTH] Google session exists but missing provider tokens');
-          setAuthError('Google authentication incomplete. Please sign in again.');
+        // Enhanced Google token validation
+        if (session && session.user?.app_metadata?.provider === 'google') {
+          if (!session.provider_token && !session.access_token) {
+            console.error('[AUTH] Google session exists but missing all OAuth tokens');
+            setAuthError('Google authentication incomplete. Please sign in again to get proper access tokens.');
+          } else {
+            console.log('[AUTH] Google session validated with available tokens');
+          }
         }
       } catch (error) {
         console.error('[AUTH] Error during auth initialization:', error);
@@ -211,7 +271,7 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     };
   }, []); // Empty dependency array is correct here
 
-  // Auto-refresh tokens before they expire
+  // Enhanced auto-refresh tokens before they expire
   useEffect(() => {
     if (!session?.expires_at) return;
 
@@ -221,9 +281,16 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     // Refresh 5 minutes before expiration
     const refreshTime = (expiresAt - now - 300) * 1000;
     
+    console.log('[AUTH] Token expiration check:', {
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      now: new Date(now * 1000).toISOString(),
+      refreshInMs: refreshTime,
+      willAutoRefresh: refreshTime > 0
+    });
+    
     if (refreshTime > 0) {
       const timeoutId = setTimeout(() => {
-        console.log('[AUTH] Auto-refreshing session...');
+        console.log('[AUTH] Auto-refreshing session before expiration...');
         refreshSession();
       }, refreshTime);
 

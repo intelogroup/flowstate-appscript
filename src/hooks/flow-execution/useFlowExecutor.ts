@@ -37,12 +37,12 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       return null;
     }
 
-    // Enhanced token validation and extraction
-    const accessToken = session.access_token || session.provider_token;
+    // Enhanced and comprehensive token validation
+    const accessToken = session.access_token;
     const refreshToken = session.refresh_token;
     const providerToken = session.provider_token;
 
-    console.log('[FLOW EXECUTOR] Session debug:', {
+    console.log('[FLOW EXECUTOR] Comprehensive session debug:', {
       hasSession: !!session,
       hasUser: !!session.user,
       hasAccessToken: !!accessToken,
@@ -51,23 +51,54 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       provider: session.user?.app_metadata?.provider,
       isGoogleConnected,
       sessionKeys: Object.keys(session || {}),
-      userKeys: Object.keys(session.user || {})
+      userKeys: Object.keys(session.user || {}),
+      // Safe token length checks
+      accessTokenLength: accessToken?.length || 0,
+      providerTokenLength: providerToken?.length || 0,
+      refreshTokenLength: refreshToken?.length || 0,
+      // Safe token previews for debugging
+      accessTokenStart: accessToken?.substring(0, 20) || 'none',
+      providerTokenStart: providerToken?.substring(0, 20) || 'none'
     });
 
-    if (!accessToken && !providerToken) {
+    // Check for any valid OAuth token
+    const validOAuthToken = accessToken || providerToken;
+    
+    if (!validOAuthToken) {
       const errorMsg = "Google OAuth tokens not found. Please refresh your authentication.";
       addLog(errorMsg, true);
-      toast({
-        title: "🔴 Token Issue",
-        description: errorMsg,
-        variant: "destructive"
-      });
-      return null;
+      addLog("🔧 Attempting to refresh session automatically...", false);
+      
+      // Try to refresh session automatically
+      try {
+        await refreshSession();
+        // After refresh, check again
+        const newSession = session; // This will be updated by the auth context
+        const newToken = newSession?.access_token || newSession?.provider_token;
+        
+        if (!newToken) {
+          toast({
+            title: "🔴 Token Issue",
+            description: "Please sign out and sign in again with Google.",
+            variant: "destructive"
+          });
+          return null;
+        }
+      } catch (refreshError) {
+        addLog(`❌ Session refresh failed: ${refreshError}`, true);
+        toast({
+          title: "🔴 Token Issue",
+          description: errorMsg,
+          variant: "destructive"
+        });
+        return null;
+      }
     }
 
     const startTime = Date.now();
     addLog(`🚀 Starting execution for flow: ${flow.flow_name}`);
     addLog(`🔑 Using Google tokens - Access: ${!!accessToken}, Provider: ${!!providerToken}`);
+    addLog(`📊 Token details: Access(${accessToken?.length || 0} chars), Provider(${providerToken?.length || 0} chars)`);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
@@ -83,15 +114,16 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         showEmailDetails: true // Show email details in debug
       };
 
-      // Enhanced token structure - try multiple token sources
+      // Enhanced and comprehensive token structure
       const googleTokens = {
-        access_token: accessToken || '',
+        access_token: validOAuthToken || '', // Use the best available token
         refresh_token: refreshToken || '',
-        provider_token: providerToken || accessToken || ''
+        provider_token: providerToken || accessToken || '' // Fallback chain
       };
 
       addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
-      addLog(`🔐 Tokens prepared - Access: ${googleTokens.access_token.substring(0, 20)}...`);
+      addLog(`🔐 Tokens prepared - Primary: ${googleTokens.access_token.substring(0, 20)}...`);
+      addLog(`🔄 Backup tokens - Provider: ${googleTokens.provider_token.substring(0, 20)}...`);
       
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
@@ -153,9 +185,10 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         
         // Check for authentication-specific errors
         if (errorMessage.includes('401') || errorMessage.includes('Invalid auth_token') || errorMessage.includes('authentication')) {
+          addLog("🔧 Detected authentication error - this might be a token issue", true);
           toast({
             title: "🔐 Authentication Error",
-            description: "Your Google authentication has expired. Please refresh and try again.",
+            description: "Your Google authentication may have expired. Please try refreshing or signing in again.",
             variant: "destructive"
           });
         } else {
@@ -184,6 +217,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         });
       } else if (errorMessage.includes('401') || errorMessage.includes('Invalid auth_token')) {
         addLog(`🔐 Authentication error: ${errorMessage}`, true);
+        addLog("💡 Tip: Try refreshing your Google authentication", false);
         toast({
           title: "🔐 Authentication Error",
           description: "Please refresh your authentication and try again.",
