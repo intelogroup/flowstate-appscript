@@ -16,13 +16,10 @@ import PerformanceMonitor from './flow/PerformanceMonitor';
 import FlowList from './flow/FlowList';
 
 const FlowManager = React.memo(() => {
-  const { session } = useAuth();
+  const { session, isGoogleConnected } = useAuth();
   const { userFlows, isLoading, deleteFlow } = useFlowManagement();
   const { runningFlows, executionLogs, executeFlow, clearLogs, checkConnectivity } = useFlowExecution();
   const { startCooldown, getCooldownInfo } = useFlowCooldown();
-
-  // Check if user has Google authentication
-  const hasGoogleAuth = !!(session?.provider_token || session?.access_token);
 
   const handleRunFlow = React.useCallback(async (flow: any) => {
     const result = await executeFlow(flow);
@@ -71,18 +68,15 @@ const FlowManager = React.memo(() => {
         <FlowManagerHeader />
         <CardContent className="space-y-4">
           {/* Authentication Status */}
-          <AuthStatusAlert 
-            hasGoogleAuth={hasGoogleAuth}
-            authError={null}
-          />
+          <AuthStatusAlert />
 
           {!userFlows || userFlows.length === 0 ? (
-            <EmptyFlowsMessage hasGoogleAuth={hasGoogleAuth} />
+            <EmptyFlowsMessage hasGoogleAuth={isGoogleConnected} />
           ) : (
             <FlowList
               flows={userFlows}
               runningFlows={runningFlows}
-              hasGoogleAuth={hasGoogleAuth}
+              hasGoogleAuth={isGoogleConnected}
               getCooldownInfo={getCooldownInfo}
               onRun={handleRunFlow}
               onDelete={handleDeleteFlow}
