@@ -19,7 +19,8 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
     driveFolder: '',
     fileTypes: [] as string[],
     autoRun: false,
-    frequency: 'daily'
+    frequency: 'daily',
+    olderThanMinutes: 60
   });
 
   const updateFlowData = (field: string, value: any) => {
@@ -87,6 +88,22 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
           onChange={(e) => updateFlowData('driveFolder', e.target.value)}
           className="border-gray-200 focus:border-blue-500"
         />
+      </div>
+
+      {/* Time Filter */}
+      <div className="space-y-2">
+        <Label htmlFor="olderThanMinutes">Process emails older than (minutes)</Label>
+        <Input
+          id="olderThanMinutes"
+          type="number"
+          placeholder="60"
+          value={flowData.olderThanMinutes}
+          onChange={(e) => updateFlowData('olderThanMinutes', parseInt(e.target.value) || 60)}
+          className="border-gray-200 focus:border-blue-500"
+        />
+        <p className="text-sm text-gray-500">
+          Only process emails older than this many minutes (default: 60 minutes)
+        </p>
       </div>
 
       {/* File Types */}
