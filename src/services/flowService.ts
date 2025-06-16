@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 
 export interface FlowConfig {
@@ -55,6 +54,13 @@ export class FlowService {
   ): Promise<FlowExecutionResult> {
     try {
       console.log('[FLOW SERVICE] Executing flow with V.06 payload structure');
+      console.log('[FLOW SERVICE] Google tokens debug:', {
+        hasAccessToken: !!googleTokens.access_token,
+        hasRefreshToken: !!googleTokens.refresh_token,
+        hasProviderToken: !!googleTokens.provider_token,
+        accessTokenLength: googleTokens.access_token?.length || 0,
+        providerTokenLength: googleTokens.provider_token?.length || 0
+      });
       
       const payload = {
         action: 'process_gmail_flow',
@@ -65,15 +71,28 @@ export class FlowService {
           supabase_timestamp: new Date().toISOString(),
           auth_method: 'body-based-v4',
           timeout_config: 90000,
-          request_source: 'edge-function-enhanced-debug'
+          request_source: 'edge-function-enhanced-debug',
+          token_debug: {
+            access_token_present: !!googleTokens.access_token,
+            provider_token_present: !!googleTokens.provider_token,
+            refresh_token_present: !!googleTokens.refresh_token
+          }
         }
       };
+
+      console.log('[FLOW SERVICE] Final payload being sent:', {
+        action: payload.action,
+        hasUserConfig: !!payload.userConfig,
+        hasGoogleTokens: !!payload.googleTokens,
+        tokenKeys: Object.keys(payload.googleTokens || {}),
+        payloadSize: JSON.stringify(payload).length
+      });
 
       const response = await fetch(this.EDGE_FUNCTION_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${googleTokens.access_token}`
+          'Authorization': `Bearer ${googleTokens.access_token || googleTokens.provider_token}`
         },
         body: JSON.stringify(payload)
       });

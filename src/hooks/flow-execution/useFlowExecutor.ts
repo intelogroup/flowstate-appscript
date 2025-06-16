@@ -26,8 +26,35 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       return null;
     }
 
+    // Enhanced token validation and extraction
+    const accessToken = session.access_token || session.provider_token;
+    const refreshToken = session.refresh_token;
+    const providerToken = session.provider_token;
+
+    console.log('[FLOW EXECUTOR] Session debug:', {
+      hasSession: !!session,
+      hasAccessToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
+      hasProviderToken: !!providerToken,
+      provider: session.user?.app_metadata?.provider,
+      sessionKeys: Object.keys(session || {}),
+      userKeys: Object.keys(session.user || {})
+    });
+
+    if (!accessToken && !providerToken) {
+      const errorMsg = "Google OAuth tokens not found. Please re-authenticate with Google.";
+      addLog(errorMsg, true);
+      toast({
+        title: "🔴 Authentication Issue",
+        description: errorMsg,
+        variant: "destructive"
+      });
+      return null;
+    }
+
     const startTime = Date.now();
     addLog(`🚀 Starting execution for flow: ${flow.flow_name}`);
+    addLog(`🔑 Using Google tokens - Access: ${!!accessToken}, Provider: ${!!providerToken}`);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
     try {
@@ -43,13 +70,16 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         showEmailDetails: true // Show email details in debug
       };
 
+      // Enhanced token structure - try multiple token sources
       const googleTokens = {
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        provider_token: session.provider_token
+        access_token: accessToken || '',
+        refresh_token: refreshToken || '',
+        provider_token: providerToken || accessToken || ''
       };
 
       addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
+      addLog(`🔐 Tokens prepared - Access: ${googleTokens.access_token.substring(0, 20)}...`);
+      
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
       const executionTime = Date.now() - startTime;
@@ -107,12 +137,19 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       const executionTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       
-      // Enhanced error handling for timeouts
+      // Enhanced error handling for timeouts and auth issues
       if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
         addLog(`⏱️ Flow timed out after ${Math.round(executionTime / 1000)}s - consider reducing email count`, true);
         toast({
           title: "⏱️ Flow Timeout",
           description: "The flow took too long to complete. Try processing fewer emails at once.",
+          variant: "destructive"
+        });
+      } else if (errorMessage.includes('401') || errorMessage.includes('Invalid auth_token')) {
+        addLog(`🔐 Authentication error: ${errorMessage}`, true);
+        toast({
+          title: "🔐 Authentication Error",
+          description: "Please re-authenticate with Google and try again.",
           variant: "destructive"
         });
       } else {
