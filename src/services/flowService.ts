@@ -74,8 +74,9 @@ export class FlowService {
       const payload = {
         action: 'process_gmail_flow',
         userConfig,
-        // Include access_token directly in the payload for edge function to parse
-        access_token: primaryToken,
+        // Apps Script expects the token as 'auth_token' in the payload
+        auth_token: primaryToken,
+        access_token: primaryToken, // Also include as access_token for compatibility
         googleTokens: {
           access_token: primaryToken,
           refresh_token: googleTokens.refresh_token || '',
@@ -84,7 +85,7 @@ export class FlowService {
         debug_info: {
           request_id: `flow-${flowId}-${Date.now()}`,
           supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v5',
+          auth_method: 'body-based-v6',
           timeout_config: 90000,
           request_source: 'edge-function-enhanced-debug',
           token_debug: {
@@ -100,6 +101,7 @@ export class FlowService {
         hasUserConfig: !!payload.userConfig,
         hasGoogleTokens: !!payload.googleTokens,
         hasAccessToken: !!payload.access_token,
+        hasAuthToken: !!payload.auth_token,
         primaryTokenPresent: !!primaryToken,
         primaryTokenLength: primaryToken?.length || 0,
         payloadSize: JSON.stringify(payload).length
