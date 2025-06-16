@@ -276,7 +276,7 @@ serve(async (req) => {
       )
     }
 
-    // Get Apps Script configuration
+    // Get Apps Script configuration - UPDATED TO USE NEW URL
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL');
     const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET');
     
@@ -284,7 +284,8 @@ serve(async (req) => {
       url_present: !!appsScriptUrl,
       secret_present: !!appsScriptSecret,
       url_preview: appsScriptUrl ? appsScriptUrl.substring(0, 50) + '...' : 'NOT SET',
-      auth_method: 'body-based (Apps Script compatible)'
+      auth_method: 'body-based (Apps Script compatible)',
+      secret_preview: appsScriptSecret ? appsScriptSecret.substring(0, 8) + '...' : 'NOT SET'
     });
     
     if (!appsScriptUrl) {
@@ -303,6 +304,30 @@ serve(async (req) => {
               '4. Set Execute as: "User accessing the web app"',
               '5. Set Who has access to: "Anyone"',
               '6. Copy the Web App URL to APPS_SCRIPT_WEB_APP_URL secret'
+            ]
+          }
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
+    if (!appsScriptSecret) {
+      logWithTimestamp('ERROR', `Apps Script secret not configured [${requestId}]`);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Apps Script secret not configured',
+          details: 'APPS_SCRIPT_SECRET environment variable is missing',
+          request_id: requestId,
+          troubleshooting: {
+            message: 'Please configure the Apps Script secret',
+            steps: [
+              '1. Run setupScriptSecret() in your Apps Script',
+              '2. Copy the generated secret',
+              '3. Add it as APPS_SCRIPT_SECRET in Supabase secrets',
+              '4. Make sure the secret matches in both places'
             ]
           }
         }),
@@ -364,8 +389,8 @@ serve(async (req) => {
 
       // Prepare payload for Apps Script with body-based authentication
       const payload = {
-        // NEW: Include auth_token in request body for Apps Script compatibility
-        auth_token: appsScriptSecret || null,
+        // FIXED: Include auth_token in request body for Apps Script compatibility
+        auth_token: appsScriptSecret,
         action: 'process_gmail_flow',
         userConfig: {
           flowName: flowConfig.flow_name,
@@ -383,9 +408,10 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '8.0-body-auth-compatible',
+          edge_function_version: '9.0-secret-validation-fixed',
           auth_method: 'body-based',
           flow_id: flowConfig.id,
+          secret_configured: !!appsScriptSecret,
           original_debug_info: requestBody.debug_info || {}
         }
       };
@@ -396,7 +422,8 @@ serve(async (req) => {
         payload_size: JSON.stringify(payload).length,
         has_google_tokens: !!payload.googleTokens.access_token,
         has_auth_token: !!payload.auth_token,
-        auth_method: 'body-based'
+        auth_method: 'body-based',
+        secret_match_check: payload.auth_token === appsScriptSecret
       });
 
       // Prepare headers for Apps Script call (no Authorization header needed)
@@ -405,14 +432,14 @@ serve(async (req) => {
         'X-Request-ID': requestId,
         'X-User-ID': user.id,
         'X-Flow-ID': flowId,
-        'User-Agent': 'FlowState-EdgeFunction/8.0-BodyAuth'
+        'User-Agent': 'FlowState-EdgeFunction/9.0-SecretValidation'
       };
 
       logWithTimestamp('INFO', `Using body-based authentication for Apps Script compatibility [${requestId}]`);
 
       // Call Apps Script with body-based authentication
       try {
-        logWithTimestamp('INFO', `Calling Apps Script API with body-based auth [${requestId}]`);
+        logWithTimestamp('INFO', `Calling Apps Script API with validated secret [${requestId}]`);
         logWithTimestamp('INFO', `Apps Script URL: ${appsScriptUrl} [${requestId}]`);
         
         const appsScriptResponse = await fetch(appsScriptUrl, {
@@ -442,21 +469,22 @@ serve(async (req) => {
           let troubleshootingSteps = [];
 
           if (appsScriptResponse.status === 401) {
-            troubleshootingMessage = 'Apps Script authentication failed - check body-based auth token validation';
+            troubleshootingMessage = 'Apps Script authentication failed - secret mismatch';
             troubleshootingSteps = [
-              '1. Verify the APPS_SCRIPT_SECRET is correctly set in Supabase',
-              '2. Ensure your Apps Script reads auth_token from request body JSON',
-              '3. Update Apps Script to use: const data = JSON.parse(e.postData.contents); const authToken = data.auth_token;',
-              '4. Check Apps Script deployment permissions',
-              '5. Set "Execute as" to "User accessing the web app"',
-              '6. Set "Who has access" to "Anyone"'
+              '1. Run setupScriptSecret() in your Apps Script to generate a new secret',
+              '2. Copy the generated secret and update APPS_SCRIPT_SECRET in Supabase',
+              '3. Make sure the secret values match exactly',
+              '4. Verify your Apps Script code uses: const authToken = data.auth_token;',
+              '5. Check that auth token validation is working in Apps Script',
+              '6. Ensure deployment permissions are correct'
             ];
           } else if (appsScriptResponse.status === 404) {
             troubleshootingMessage = 'Apps Script URL not found - check deployment URL';
             troubleshootingSteps = [
               '1. Verify the APPS_SCRIPT_WEB_APP_URL is correct',
               '2. Check that your Apps Script is deployed as a Web App',
-              '3. Ensure the deployment is active and not disabled'
+              '3. Ensure the deployment is active and not disabled',
+              '4. Make sure the URL ends with /exec'
             ];
           } else if (appsScriptResponse.status === 403) {
             troubleshootingMessage = 'Apps Script access denied - permission issue';
@@ -478,7 +506,8 @@ serve(async (req) => {
                 apps_script_url: appsScriptUrl,
                 error_details: errorText.substring(0, 200),
                 auth_method: 'body-based',
-                has_secret_configured: !!appsScriptSecret
+                secret_configured: !!appsScriptSecret,
+                secret_sent: !!payload.auth_token
               }
             }),
             { 
@@ -505,7 +534,7 @@ serve(async (req) => {
               payload_sent: payload.action,
               flow_name: payload.userConfig.flowName,
               auth_method: 'body-based',
-              has_secret_configured: !!appsScriptSecret
+              secret_configured: !!appsScriptSecret
             }
           }),
           { 
