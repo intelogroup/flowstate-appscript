@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -65,8 +66,8 @@ export const useFlowOperations = (
 
       addDebugInfo(`✅ Token ready: ${authToken.substring(0, 20)}...${authToken.substring(authToken.length - 10)} (${authToken.length} chars)`);
 
-      // Step 4: Enhanced payload preparation
-      addDebugInfo("📋 Step 4: Enhanced payload preparation");
+      // Step 4: Simplified payload preparation
+      addDebugInfo("📋 Step 4: Simplified payload preparation");
       const requestPayload = {
         action: 'run_flow',
         flowId: flow.id,
@@ -76,186 +77,128 @@ export const useFlowOperations = (
           user_id: session.user?.id,
           user_email: session.user?.email,
           provider: session.user?.app_metadata?.provider,
-          token_length: authToken.length,
-          token_preview: authToken.substring(0, 20) + '...',
           flow_name: flow.flow_name,
-          has_provider_token: !!session.provider_token,
-          session_expires: session.expires_at,
-          attempt_number: 1,
-          client_version: '3.0-fixed-payload'
+          client_version: '5.0-simplified'
         }
       };
 
-      // Validate payload before sending
-      if (!requestPayload.action || !requestPayload.flowId || !requestPayload.access_token) {
-        const errorMsg = "Invalid payload - missing required fields";
-        addDebugInfo(`❌ ${errorMsg}`, true);
-        addDebugInfo(`  - Action: ${!!requestPayload.action}`, true);
-        addDebugInfo(`  - FlowId: ${!!requestPayload.flowId}`, true);
-        addDebugInfo(`  - Access Token: ${!!requestPayload.access_token}`, true);
-        toast({
-          title: "🔴 Payload Error",
-          description: errorMsg,
-          variant: "destructive"
-        });
-        return;
-      }
-
-      addDebugInfo(`📦 Enhanced payload prepared with ${Object.keys(requestPayload).length} keys`);
+      addDebugInfo(`📦 Payload prepared with ${Object.keys(requestPayload).length} keys`);
       addDebugInfo(`🎯 Target flow: ${flow.flow_name} (ID: ${flow.id})`);
-      addDebugInfo(`📋 Payload size: ${JSON.stringify(requestPayload).length} characters`);
 
-      // Step 5: Enhanced primary method with better error handling
-      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke with enhanced error handling");
+      // Step 5: Primary method with proper error handling
+      addDebugInfo("📋 Step 5: Primary method - supabase.functions.invoke");
       let response;
-      let attemptMethod = "primary";
       
       try {
-        addDebugInfo("🌐 Calling supabase.functions.invoke with proper payload...");
-        addDebugInfo(`📤 Sending payload: ${JSON.stringify(requestPayload).substring(0, 150)}...`);
+        addDebugInfo("🌐 Calling supabase.functions.invoke...");
         
         const invokeStartTime = performance.now();
         response = await supabase.functions.invoke('apps-script-proxy', {
           body: requestPayload,
           headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Source': 'flowmanager-primary-v4',
-            'X-User-Agent': 'FlowState-WebApp/4.0',
-            'X-Flow-ID': flow.id,
-            'X-Request-Source': 'web-client-v4'
+            'Content-Type': 'application/json'
           }
         });
         const invokeEndTime = performance.now();
 
         addDebugInfo(`⏱️ Primary method completed in ${Math.round(invokeEndTime - invokeStartTime)}ms`);
-        addDebugInfo(`📊 Response status: ${response.error ? 'ERROR' : 'SUCCESS'}`);
         
         if (response.error) {
-          addDebugInfo(`❌ Primary method error details:`, true);
-          addDebugInfo(`  - Error: ${JSON.stringify(response.error)}`, true);
-          addDebugInfo(`  - Error type: ${typeof response.error}`, true);
-          addDebugInfo(`  - Error message: ${response.error.message || 'No message'}`, true);
-          addDebugInfo(`  - Error name: ${response.error.name || 'Unknown'}`, true);
-          addDebugInfo(`  - Error context: ${JSON.stringify(response.error.context || {})}`, true);
-
-          // Check if this is a network-level error (FunctionsFetchError)
+          addDebugInfo(`❌ Primary method error:`, true);
+          addDebugInfo(`  - Error name: ${response.error.name}`, true);
+          addDebugInfo(`  - Error message: ${response.error.message}`, true);
+          
+          // Check for network-level errors that require fallback
           if (response.error.name === 'FunctionsFetchError') {
-            addDebugInfo(`🔄 Network error detected, trying fallback method immediately`, true);
+            addDebugInfo(`🔄 Network error detected, trying fallback method`, true);
             throw new Error(`Network error: ${response.error.message}`);
           }
         } else {
-          addDebugInfo(`✅ Primary method success data:`);
-          addDebugInfo(`  - Data keys: ${response.data ? Object.keys(response.data).join(', ') : 'No data'}`);
+          addDebugInfo(`✅ Primary method successful`);
+          addDebugInfo(`📊 Response data: ${response.data ? 'Present' : 'None'}`);
         }
 
       } catch (invokeError) {
-        addDebugInfo(`💥 Primary method threw exception:`, true);
-        addDebugInfo(`  - Error name: ${invokeError.name}`, true);
-        addDebugInfo(`  - Error message: ${invokeError.message}`, true);
+        addDebugInfo(`💥 Primary method failed:`, true);
+        addDebugInfo(`  - Error: ${invokeError.message}`, true);
         
-        // Step 6: Enhanced fallback method with direct URL and better error handling
-        addDebugInfo("📋 Step 6: Enhanced fallback method - direct fetch with full URL");
-        attemptMethod = "fallback";
+        // Step 6: Fallback method using direct fetch
+        addDebugInfo("📋 Step 6: Fallback method - direct fetch");
         
         try {
-          const edgeFunctionUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
-          addDebugInfo(`🌐 Fallback URL: ${edgeFunctionUrl}`);
+          const fallbackUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
+          addDebugInfo(`🌐 Fallback URL: ${fallbackUrl}`);
           
-          const fallbackPayload = {
-            ...requestPayload,
-            debug_info: {
-              ...requestPayload.debug_info,
-              fallback_attempt: true,
-              primary_error: invokeError.message,
-              method: 'direct_fetch_v4',
-              attempt_number: 2
-            }
-          };
-
-          addDebugInfo("📤 Making direct fetch request with full URL...");
-          addDebugInfo(`📋 Fallback payload size: ${JSON.stringify(fallbackPayload).length} characters`);
+          const fallbackStartTime = performance.now();
           
-          const fetchStartTime = performance.now();
-          
-          const fetchResponse = await fetch(edgeFunctionUrl, {
+          const fetchResponse = await fetch(fallbackUrl, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
-              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-              'X-Debug-Source': 'flowmanager-fallback-v4',
-              'X-User-Agent': 'FlowState-WebApp/4.0',
-              'X-Flow-ID': flow.id,
-              'X-Request-Source': 'web-client-fallback-v4'
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0'
             },
-            body: JSON.stringify(fallbackPayload)
+            body: JSON.stringify({
+              ...requestPayload,
+              debug_info: {
+                ...requestPayload.debug_info,
+                fallback_attempt: true,
+                primary_error: invokeError.message
+              }
+            })
           });
 
-          const fetchEndTime = performance.now();
-          addDebugInfo(`⏱️ Fallback method completed in ${Math.round(fetchEndTime - fetchStartTime)}ms`);
-          addDebugInfo(`📊 Fallback response status: ${fetchResponse.status} ${fetchResponse.statusText}`);
+          const fallbackEndTime = performance.now();
+          addDebugInfo(`⏱️ Fallback method completed in ${Math.round(fallbackEndTime - fallbackStartTime)}ms`);
+          addDebugInfo(`📊 Fallback response status: ${fetchResponse.status}`);
 
-          let responseData;
-          const responseText = await fetchResponse.text();
-          addDebugInfo(`📄 Raw response length: ${responseText.length} chars`);
-          addDebugInfo(`📄 Raw response preview: ${responseText.substring(0, 200)}...`);
-          
-          try {
-            responseData = JSON.parse(responseText);
-            addDebugInfo(`✅ Successfully parsed JSON response`);
-          } catch (jsonError) {
-            addDebugInfo(`❌ Failed to parse JSON: ${jsonError.message}`, true);
-            addDebugInfo(`❌ Response text: ${responseText}`, true);
-            throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`);
+          if (!fetchResponse.ok) {
+            const errorText = await fetchResponse.text();
+            addDebugInfo(`❌ Fallback method failed: ${fetchResponse.status}`, true);
+            addDebugInfo(`❌ Error response: ${errorText}`, true);
+            
+            toast({
+              title: "🔴 Network Connection Error",
+              description: "Both primary and fallback methods failed. Please check your connection.",
+              variant: "destructive"
+            });
+            return;
           }
 
+          const responseData = await fetchResponse.json();
           response = {
-            data: fetchResponse.ok ? responseData : null,
-            error: fetchResponse.ok ? null : { 
-              message: responseData.error || `HTTP ${fetchResponse.status}: ${fetchResponse.statusText}`,
-              status: fetchResponse.status,
-              details: responseData,
-              name: 'HTTPError'
-            }
+            data: responseData,
+            error: null
           };
 
-          addDebugInfo(`📊 Fallback method result: ${fetchResponse.ok ? 'SUCCESS' : 'ERROR'}`);
+          addDebugInfo(`✅ Fallback method successful`);
 
         } catch (fetchError) {
           addDebugInfo(`💥 Fallback method also failed:`, true);
-          addDebugInfo(`  - Error message: ${fetchError.message}`, true);
-          addDebugInfo(`  - Error name: ${fetchError.name}`, true);
+          addDebugInfo(`  - Error: ${fetchError.message}`, true);
           
-          // If both methods fail, provide helpful error message
           toast({
-            title: "🔴 Network Connection Error",
-            description: "Both primary and fallback methods failed. Please check your internet connection and try again.",
+            title: "🔴 Complete Network Failure",
+            description: "Unable to reach the Edge Function. Please try again later.",
             variant: "destructive"
           });
           return;
         }
       }
 
-      // Step 7: Enhanced response analysis
-      addDebugInfo(`📋 Step 7: Enhanced response analysis (${attemptMethod} method)`);
+      // Step 7: Response analysis
+      addDebugInfo(`📋 Step 7: Response analysis`);
       
       if (response.error) {
         addDebugInfo(`❌ === ERROR ANALYSIS ===`, true);
         const errorMessage = response.error.message || 'Unknown error';
-        const errorStatus = response.error.status || 'Unknown status';
-        const errorName = response.error.name || 'Unknown error type';
         
-        addDebugInfo(`🔍 Error details:`, true);
-        addDebugInfo(`  - Name: "${errorName}"`, true);
-        addDebugInfo(`  - Message: "${errorMessage}"`, true);
-        addDebugInfo(`  - Status: ${errorStatus}`, true);
+        addDebugInfo(`🔍 Error message: "${errorMessage}"`, true);
         
         // Enhanced error categorization
-        if (errorMessage.includes('401') || 
-            errorMessage.includes('Unauthorized') || 
-            errorStatus === 401) {
-          const authErrorMsg = "🔐 Google authentication has expired. Please sign in with Google again.";
-          addDebugInfo(`🔐 Authentication error: ${authErrorMsg}`, true);
+        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+          const authErrorMsg = "🔐 Authentication expired. Please sign in again.";
+          addDebugInfo(authErrorMsg, true);
           setAuthError(authErrorMsg);
           toast({
             title: "🔴 Authentication Expired",
@@ -265,10 +208,9 @@ export const useFlowOperations = (
           return;
         }
         
-        if (errorMessage.includes('Google OAuth') || 
-            errorMessage.includes('requiresGoogleAuth')) {
+        if (errorMessage.includes('Google OAuth') || errorMessage.includes('requiresGoogleAuth')) {
           const googleAuthMsg = "🔗 Google authentication required. Please sign in with Google.";
-          addDebugInfo(`🔗 Google OAuth error: ${googleAuthMsg}`, true);
+          addDebugInfo(googleAuthMsg, true);
           setAuthError(googleAuthMsg);
           toast({
             title: "🔴 Google Authentication Required",
@@ -278,11 +220,9 @@ export const useFlowOperations = (
           return;
         }
 
-        if (errorMessage.includes('403') || 
-            errorMessage.includes('Forbidden') || 
-            errorStatus === 403) {
+        if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
           const permissionMsg = "🚫 Google permissions denied. Please grant access to Gmail and Drive.";
-          addDebugInfo(`🚫 Permission error: ${permissionMsg}`, true);
+          addDebugInfo(permissionMsg, true);
           setAuthError(permissionMsg);
           toast({
             title: "🔴 Permissions Required",
@@ -306,12 +246,12 @@ export const useFlowOperations = (
       addDebugInfo(`🎉 Flow execution completed successfully!`);
       
       if (response.data) {
-        addDebugInfo(`📊 Success data: ${JSON.stringify(response.data).substring(0, 200)}...`);
+        addDebugInfo(`📊 Success data received`);
       }
 
       toast({
         title: "🎉 Flow Executed Successfully!",
-        description: `${flow.flow_name} has been executed. Check your Google Drive folder for saved attachments.`,
+        description: `${flow.flow_name} has been executed. Check your Google Drive folder.`,
       });
 
       addDebugInfo(`🏁 === FLOW EXECUTION COMPLETED SUCCESSFULLY ===`);
@@ -319,7 +259,6 @@ export const useFlowOperations = (
     } catch (error) {
       addDebugInfo(`💥 === UNEXPECTED ERROR ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
-      addDebugInfo(`🔍 Error name: ${error.name}`, true);
       
       toast({
         title: "🔴 Unexpected Error",

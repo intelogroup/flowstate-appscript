@@ -5,7 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-debug-source, x-user-agent, x-flow-id, x-request-source',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET'
 }
 
 // Enhanced logging function
@@ -21,12 +21,49 @@ const logWithTimestamp = (level: string, message: string, data?: any) => {
 serve(async (req) => {
   const requestId = crypto.randomUUID().substring(0, 8);
   logWithTimestamp('INFO', `=== REQUEST START [${requestId}] ===`);
+  logWithTimestamp('INFO', `Method: ${req.method}, URL: ${req.url}`);
   
   try {
-    // Handle CORS preflight requests
+    // Handle CORS preflight requests FIRST
     if (req.method === 'OPTIONS') {
       logWithTimestamp('INFO', `CORS preflight request handled [${requestId}]`);
-      return new Response('ok', { headers: corsHeaders })
+      return new Response('ok', { 
+        status: 200,
+        headers: corsHeaders 
+      })
+    }
+
+    // Handle GET requests for health checks
+    if (req.method === 'GET') {
+      logWithTimestamp('INFO', `Health check request [${requestId}]`);
+      return new Response(
+        JSON.stringify({ 
+          status: 'ok', 
+          message: 'Apps Script Proxy is running',
+          timestamp: new Date().toISOString(),
+          request_id: requestId
+        }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
+    // Only allow POST requests for actual processing
+    if (req.method !== 'POST') {
+      logWithTimestamp('ERROR', `Method not allowed: ${req.method} [${requestId}]`);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Method not allowed', 
+          allowed_methods: ['GET', 'POST', 'OPTIONS'],
+          request_id: requestId
+        }),
+        { 
+          status: 405, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
     }
 
     logWithTimestamp('INFO', `Processing ${req.method} request to ${req.url} [${requestId}]`);
@@ -328,7 +365,7 @@ serve(async (req) => {
           provider: user.app_metadata?.provider,
           token_source: tokenSource,
           token_length: token.length,
-          edge_function_version: '4.0-network-fixed',
+          edge_function_version: '5.0-cors-fixed',
           flow_id: flowConfig.id,
           original_debug_info: requestBody.debug_info || {}
         }
