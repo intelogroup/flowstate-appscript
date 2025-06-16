@@ -276,61 +276,71 @@ serve(async (req) => {
       }, 400);
     }
 
-    // Create proper Apps Script payload format
+    // Create proper Apps Script payload format with enhanced debugging
     let bodyForGas;
     
     if (originalPayload.action === 'run_flow') {
-      // Convert run_flow to the format Apps Script expects
+      // Convert run_flow to the format Apps Script expects with debug mode
       bodyForGas = {
-        auth_token: appsScriptSecret,
-        action: 'process_gmail_flow',
-        userConfig: {
-          ...originalPayload.userConfig,
-          maxEmails: originalPayload.userConfig?.maxEmails || 5
-        },
-        googleTokens: originalPayload.googleTokens || null,
-        debug_info: {
-          ...debugInfo,
-          supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v3',
-          timeout_config: getTimeoutForOperation(originalPayload.action, originalPayload.userConfig)
+        secret: appsScriptSecret,
+        payload: {
+          action: 'process_gmail_flow',
+          userConfig: {
+            ...originalPayload.userConfig,
+            maxEmails: originalPayload.userConfig?.maxEmails || 5,
+            enableDebugMode: true, // Enable detailed debugging
+            showEmailDetails: true // Show which emails were found/filtered
+          },
+          googleTokens: originalPayload.googleTokens || null,
+          debug_info: {
+            ...debugInfo,
+            supabase_timestamp: new Date().toISOString(),
+            auth_method: 'body-based-v4',
+            timeout_config: getTimeoutForOperation(originalPayload.action, originalPayload.userConfig),
+            request_source: 'edge-function-enhanced-debug'
+          }
         }
       };
     } else if (originalPayload.action === 'set_flow') {
       bodyForGas = {
-        auth_token: appsScriptSecret,
-        action: 'set_flow',
-        userConfig: originalPayload.userConfig,
-        debug_info: {
-          ...debugInfo,
-          supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v3'
+        secret: appsScriptSecret,
+        payload: {
+          action: 'set_flow',
+          userConfig: originalPayload.userConfig,
+          debug_info: {
+            ...debugInfo,
+            supabase_timestamp: new Date().toISOString(),
+            auth_method: 'body-based-v4'
+          }
         }
       };
     } else {
       bodyForGas = {
-        auth_token: appsScriptSecret,
-        ...originalPayload,
-        debug_info: {
-          ...debugInfo,
-          supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v3'
+        secret: appsScriptSecret,
+        payload: {
+          ...originalPayload,
+          debug_info: {
+            ...debugInfo,
+            supabase_timestamp: new Date().toISOString(),
+            auth_method: 'body-based-v4'
+          }
         }
       };
     }
 
     // Determine appropriate timeout
-    const timeoutMs = getTimeoutForOperation(bodyForGas.action, bodyForGas.userConfig);
+    const timeoutMs = getTimeoutForOperation(bodyForGas.payload.action, bodyForGas.payload.userConfig);
 
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
-      action: bodyForGas.action,
-      hasAuthToken: !!bodyForGas.auth_token,
-      hasUserConfig: !!bodyForGas.userConfig,
+      action: bodyForGas.payload.action,
+      hasSecret: !!bodyForGas.secret,
+      hasUserConfig: !!bodyForGas.payload.userConfig,
       request_id: debugInfo.request_id,
       payload_size: JSON.stringify(bodyForGas).length,
       timeout: timeoutMs,
-      maxEmails: bodyForGas.userConfig?.maxEmails
+      maxEmails: bodyForGas.payload.userConfig?.maxEmails,
+      debugMode: bodyForGas.payload.userConfig?.enableDebugMode
     });
 
     // Call Apps Script with retry logic
@@ -363,8 +373,8 @@ serve(async (req) => {
           },
           performance_hints: {
             current_timeout: `${timeoutMs/1000}s`,
-            email_count: bodyForGas.userConfig?.maxEmails || 'unknown',
-            suggested_max_emails: Math.max(1, Math.floor((bodyForGas.userConfig?.maxEmails || 5) / 2))
+            email_count: bodyForGas.payload.userConfig?.maxEmails || 'unknown',
+            suggested_max_emails: Math.max(1, Math.floor((bodyForGas.payload.userConfig?.maxEmails || 5) / 2))
           }
         }, 504);
       }
@@ -417,12 +427,12 @@ serve(async (req) => {
           ] : [
             '1. Check Apps Script logs for detailed error information',
             '2. Verify the secret token matches between Supabase and Apps Script',
-            '3. Ensure your Apps Script doPost function handles auth_token properly'
+            '3. Ensure your Apps Script doPost function handles secret properly'
           ]
         },
         apps_script_url: appsScriptUrl,
         error_details: responseText.substring(0, 200),
-        auth_method: 'body-based-v3'
+        auth_method: 'body-based-v4'
       }, 502);
     }
 
@@ -436,7 +446,10 @@ serve(async (req) => {
         status: appsScriptData.status,
         message: appsScriptData.message,
         dataKeys: Object.keys(appsScriptData.data || {}),
-        attachments: appsScriptData.data?.attachments || 0,
+        attachments: appsScriptData.data?.attachments || appsScriptData.data?.savedAttachments || 0,
+        emailsFound: appsScriptData.data?.emailsFound || 0,
+        emailsProcessed: appsScriptData.data?.processedEmails || 0,
+        debugInfo: appsScriptData.data?.debugInfo || {},
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
         performance_metrics: {
@@ -458,13 +471,13 @@ serve(async (req) => {
       }, 502);
     }
 
-    // Return successful response with enhanced metadata
+    // Return successful response with enhanced metadata and debugging info
     return createCorsResponse({
       success: true,
       message: 'Flow processed successfully',
       timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
-      auth_method: 'body-based-v3',
+      auth_method: 'body-based-v4',
       performance_metrics: {
         total_duration: totalDuration,
         timeout_used: timeoutMs,

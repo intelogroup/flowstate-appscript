@@ -72,12 +72,13 @@ export const useFlowExecution = () => {
         provider_token: session.provider_token
       };
 
-      addLog("📋 Sending request to Edge Function with enhanced timeout handling...");
+      addLog("📋 Sending request to Edge Function with enhanced debugging...");
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
 
       const executionTime = Date.now() - startTime;
       addLog("✅ Flow execution completed successfully", false, { duration: executionTime });
       
+      // Enhanced logging with detailed debugging information
       if (result.data && result.data.attachments > 0) {
         const perfInfo = result.data.performance_metrics ? 
           ` (Total time: ${Math.round(result.data.performance_metrics.total_duration / 1000)}s)` : '';
@@ -87,6 +88,30 @@ export const useFlowExecution = () => {
           description: `${flow.flow_name} processed ${result.data.attachments} attachments.`,
         });
       } else {
+        // Enhanced debugging for no attachments found
+        const debugInfo = result.data?.debugInfo || {};
+        const emailsFound = result.data?.emailsFound || 0;
+        const emailsProcessed = result.data?.processed || 0;
+        
+        if (emailsFound > 0) {
+          addLog(`📧 Found ${emailsFound} emails but ${emailsProcessed} were processed with 0 attachments`);
+        } else {
+          addLog("📧 No emails found matching your search criteria");
+        }
+        
+        // Add specific debugging information
+        if (debugInfo.searchQuery) {
+          addLog(`🔍 Gmail search used: "${debugInfo.searchQuery}"`);
+        }
+        if (debugInfo.timeFilter) {
+          addLog(`⏰ Time filter applied: ${debugInfo.timeFilter}`);
+        }
+        if (debugInfo.emailDetails && Array.isArray(debugInfo.emailDetails)) {
+          debugInfo.emailDetails.forEach((email: any, index: number) => {
+            addLog(`📨 Email ${index + 1}: Subject="${email.subject}" Date="${email.date}" Attachments=${email.attachmentCount || 0}`);
+          });
+        }
+        
         addLog("⚠️ No attachments were found to process");
         toast({
           title: "✅ Flow Completed",
