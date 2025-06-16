@@ -14,6 +14,10 @@ serve(async (req) => {
   }
 
   try {
+    console.log('=== EDGE FUNCTION DEBUG START ===')
+    console.log('Request method:', req.method)
+    console.log('Request headers:', Object.fromEntries(req.headers.entries()))
+
     // Create supabase client
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -25,10 +29,20 @@ serve(async (req) => {
       }
     )
 
-    // Get the session from the Authorization header
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '')
+    // Parse request body first to get token from there if needed
+    const requestBody = await req.json()
+    console.log('Request body keys:', Object.keys(requestBody))
+
+    // Try to get token from Authorization header first, then from body
+    let token = req.headers.get('Authorization')?.replace('Bearer ', '')
+    
+    if (!token && requestBody.access_token) {
+      console.log('No Authorization header, using token from request body')
+      token = requestBody.access_token
+    }
+
     if (!token) {
-      console.error('No authorization token provided')
+      console.error('No authorization token provided in header or body')
       return new Response(
         JSON.stringify({ error: 'Authorization required' }),
         { 
@@ -38,10 +52,17 @@ serve(async (req) => {
       )
     }
 
-    console.log('Received token:', token.substring(0, 20) + '...')
+    console.log('Using token:', token.substring(0, 20) + '...')
 
     // Get user from token
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token)
+    
+    console.log('Auth.getUser result:', { 
+      user_id: user?.id, 
+      user_email: user?.email,
+      error: userError?.message 
+    })
+
     if (userError || !user) {
       console.error('Invalid user token:', userError)
       return new Response(
@@ -80,8 +101,8 @@ serve(async (req) => {
 
     console.log('Google user verified, provider token available')
 
-    // Parse request body
-    const { action, flowId } = await req.json()
+    // Parse request body for action and flowId
+    const { action, flowId } = requestBody
 
     // Get the Apps Script Web App URL from environment
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_WEB_APP_URL')
@@ -135,7 +156,8 @@ serve(async (req) => {
         action: payload.action, 
         user_id: payload.user_id,
         flow_name: payload.flow_config.flow_name,
-        token_present: !!payload.access_token
+        token_present: !!payload.access_token,
+        apps_script_url: appsScriptUrl
       })
 
       // Call Apps Script
@@ -146,6 +168,8 @@ serve(async (req) => {
         },
         body: JSON.stringify(payload)
       })
+
+      console.log('Apps Script response status:', appsScriptResponse.status)
 
       if (!appsScriptResponse.ok) {
         const errorText = await appsScriptResponse.text()

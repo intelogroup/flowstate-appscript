@@ -44,7 +44,7 @@ const FlowManager = () => {
   });
 
   // Check if user has Google authentication
-  const hasGoogleAuth = session?.provider_token;
+  const hasGoogleAuth = session?.provider_token || session?.access_token;
 
   const runFlow = async (flow: UserFlow) => {
     setAuthError(null);
@@ -56,25 +56,69 @@ const FlowManager = () => {
         return;
       }
 
-      if (!hasGoogleAuth) {
-        setAuthError("Google authentication is required. Please sign in with Google to access Gmail and Drive.");
+      // Enhanced debugging for session state
+      console.log('=== FLOW EXECUTION DEBUG ===');
+      console.log('Session object:', {
+        access_token_present: !!session.access_token,
+        provider_token_present: !!session.provider_token,
+        user_id: session.user?.id,
+        provider: session.user?.app_metadata?.provider,
+        expires_at: session.expires_at
+      });
+
+      const authToken = session.access_token;
+      
+      if (!authToken) {
+        setAuthError("No authentication token available. Please sign in again.");
         return;
       }
 
+      console.log('Using auth token:', authToken.substring(0, 20) + '...');
       console.log('Running flow:', flow.flow_name);
-      console.log('Session access_token available:', !!session.access_token);
-      console.log('Provider token available:', !!session.provider_token);
 
-      // Call the edge function with proper authentication headers
-      const response = await supabase.functions.invoke('apps-script-proxy', {
-        body: {
-          action: 'run_flow',
-          flowId: flow.id
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        }
-      });
+      // Try the standard supabase.functions.invoke approach first
+      let response;
+      try {
+        console.log('Attempting supabase.functions.invoke...');
+        response = await supabase.functions.invoke('apps-script-proxy', {
+          body: {
+            action: 'run_flow',
+            flowId: flow.id,
+            // Also pass token in body as fallback
+            access_token: authToken
+          },
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (invokeError) {
+        console.error('supabase.functions.invoke failed:', invokeError);
+        
+        // Fallback: Direct fetch to the edge function
+        console.log('Attempting direct fetch fallback...');
+        const edgeFunctionUrl = `https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy`;
+        
+        const fetchResponse = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0'
+          },
+          body: JSON.stringify({
+            action: 'run_flow',
+            flowId: flow.id,
+            access_token: authToken
+          })
+        });
+
+        const responseData = await fetchResponse.json();
+        response = {
+          data: fetchResponse.ok ? responseData : null,
+          error: fetchResponse.ok ? null : { message: responseData.error || 'Unknown error' }
+        };
+      }
 
       console.log('Edge function response:', response);
 
