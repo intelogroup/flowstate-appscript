@@ -24,13 +24,13 @@ export const useFlowOperations = (
   const { toast } = useToast();
   const { user, session } = useAuth();
 
-  // Direct Apps Script test function
-  const testDirectAppsScript = useCallback(async (flowId: string) => {
-    addDebugInfo('[DIRECT TEST] Starting direct Apps Script test...');
+  // Edge Function test function (proper proxy approach)
+  const testEdgeFunction = useCallback(async (flowId: string) => {
+    addDebugInfo('[EDGE FUNCTION] Starting Edge Function test via apps-script-proxy...');
     
     try {
-      // Get the flow configuration from database using correct table name
-      addDebugInfo('[DIRECT TEST] Fetching flow configuration from database...');
+      // Get the flow configuration from database
+      addDebugInfo('[EDGE FUNCTION] Fetching flow configuration from database...');
       const { data: flow, error: flowError } = await supabase
         .from('user_configurations')
         .select('*')
@@ -39,23 +39,23 @@ export const useFlowOperations = (
         .single();
 
       if (flowError) {
-        addDebugInfo(`[DIRECT TEST] Database error: ${flowError.message}`, true);
+        addDebugInfo(`[EDGE FUNCTION] Database error: ${flowError.message}`, true);
         throw new Error(`Database error: ${flowError.message}`);
       }
 
       if (!flow) {
-        addDebugInfo('[DIRECT TEST] Flow not found in database', true);
+        addDebugInfo('[EDGE FUNCTION] Flow not found in database', true);
         throw new Error('Flow not found');
       }
 
-      addDebugInfo(`[DIRECT TEST] Flow found: ${flow.flow_name}`);
-      addDebugInfo(`[DIRECT TEST] Email filter: ${flow.email_filter}`);
-      addDebugInfo(`[DIRECT TEST] Drive folder: ${flow.drive_folder}`);
+      addDebugInfo(`[EDGE FUNCTION] Flow found: ${flow.flow_name}`);
+      addDebugInfo(`[EDGE FUNCTION] Email filter: ${flow.email_filter}`);
+      addDebugInfo(`[EDGE FUNCTION] Drive folder: ${flow.drive_folder}`);
 
-      // Create the EXACT payload that Apps Script expects
+      // Create the payload for the Edge Function
       const payload = {
-        auth_token: "deff633d-63d3-4c4f-947b-61a7842bab29", // Apps Script secret
-        action: "process_gmail_flow",
+        action: "run_flow", // Edge Function expects this action
+        flowId: flow.id,
         userConfig: {
           emailFilter: flow.email_filter,
           driveFolder: flow.drive_folder,
@@ -64,114 +64,124 @@ export const useFlowOperations = (
           flowName: flow.flow_name,
           maxEmails: 5 // Reduced for faster testing
         },
-        googleTokens: null
+        googleTokens: {
+          access_token: session?.access_token,
+          refresh_token: session?.refresh_token,
+          provider_token: session?.provider_token
+        }
       };
 
-      addDebugInfo('[DIRECT TEST] Payload created for Apps Script:');
-      addDebugInfo(`- auth_token present: ${!!payload.auth_token}`);
+      addDebugInfo('[EDGE FUNCTION] Payload created for Edge Function:');
       addDebugInfo(`- action: ${payload.action}`);
+      addDebugInfo(`- flowId: ${payload.flowId}`);
       addDebugInfo(`- emailFilter: ${payload.userConfig.emailFilter}`);
       addDebugInfo(`- driveFolder: ${payload.userConfig.driveFolder}`);
       addDebugInfo(`- maxEmails: ${payload.userConfig.maxEmails}`);
+      addDebugInfo(`- hasAccessToken: ${!!payload.googleTokens.access_token}`);
 
       const payloadString = JSON.stringify(payload);
-      addDebugInfo(`[DIRECT TEST] Payload size: ${payloadString.length} characters`);
-      addDebugInfo(`[DIRECT TEST] Payload preview: ${payloadString.substring(0, 200)}...`);
+      addDebugInfo(`[EDGE FUNCTION] Payload size: ${payloadString.length} characters`);
 
-      // Call Apps Script directly (bypass Edge Function completely)
-      const appsScriptUrl = 'https://script.google.com/macros/s/AKfycbxqRLyD5famZnHY3W-sTnsYEjyxQ6Q02gcKSQba2Bw6tqTTpimZ2up0WlPKQYII-dvA/exec';
+      // Call Edge Function using proper Supabase URL
+      const edgeFunctionUrl = 'https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy';
       
-      addDebugInfo('[DIRECT TEST] Calling Apps Script directly...');
-      addDebugInfo(`[DIRECT TEST] URL: ${appsScriptUrl}`);
+      addDebugInfo('[EDGE FUNCTION] Calling Edge Function...');
+      addDebugInfo(`[EDGE FUNCTION] URL: ${edgeFunctionUrl}`);
       
       const startTime = Date.now();
       
-      const response = await fetch(appsScriptUrl, {
+      const response = await fetch(edgeFunctionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Authorization': `Bearer ${supabase.supabaseKey}`,
+          'apikey': supabase.supabaseKey
         },
-        body: payloadString,
-        mode: 'cors'
+        body: payloadString
       });
       
       const endTime = Date.now();
       const duration = endTime - startTime;
       
-      addDebugInfo(`[DIRECT TEST] Response received in ${duration}ms`);
-      addDebugInfo(`[DIRECT TEST] Status: ${response.status}`);
-      addDebugInfo(`[DIRECT TEST] Status Text: ${response.statusText}`);
+      addDebugInfo(`[EDGE FUNCTION] Response received in ${duration}ms`);
+      addDebugInfo(`[EDGE FUNCTION] Status: ${response.status}`);
+      addDebugInfo(`[EDGE FUNCTION] Status Text: ${response.statusText}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        addDebugInfo(`[DIRECT TEST] ❌ Error response body: ${errorText.substring(0, 200)}`, true);
+        addDebugInfo(`[EDGE FUNCTION] ❌ Error response body: ${errorText.substring(0, 300)}`, true);
         
-        // Check if it's HTML (login page)
-        if (errorText.trim().startsWith('<!DOCTYPE') || errorText.trim().startsWith('<html')) {
-          addDebugInfo('[DIRECT TEST] ❌ Received HTML login page - deployment settings wrong', true);
-          throw new Error('Apps Script deployment requires authentication. Check deployment settings.');
+        if (response.status === 504) {
+          addDebugInfo('[EDGE FUNCTION] ❌ Gateway timeout - Apps Script took too long', true);
+          throw new Error('Gateway timeout - Apps Script processing took too long (>30s)');
         }
         
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const result = await response.json();
-      addDebugInfo('[DIRECT TEST] ✅ SUCCESS!');
-      addDebugInfo(`[DIRECT TEST] Response structure: ${Object.keys(result).join(', ')}`);
-      addDebugInfo(`[DIRECT TEST] Status: ${result.status}`);
-      addDebugInfo(`[DIRECT TEST] Message: ${result.message}`);
+      addDebugInfo('[EDGE FUNCTION] ✅ SUCCESS!');
+      addDebugInfo(`[EDGE FUNCTION] Response structure: ${Object.keys(result).join(', ')}`);
       
-      if (result.data) {
-        addDebugInfo('[DIRECT TEST] Data received:');
-        addDebugInfo(`- Processed: ${result.data.processed}`);
-        addDebugInfo(`- Attachments: ${result.data.attachments}`);
-        addDebugInfo(`- Files: ${result.data.files?.length || 0}`);
-        addDebugInfo(`- Errors: ${result.data.errors?.length || 0}`);
+      // Handle different response formats
+      if (result.success && result.apps_script_response) {
+        const appsScriptData = result.apps_script_response;
+        addDebugInfo(`[EDGE FUNCTION] Apps Script Status: ${appsScriptData.status}`);
+        addDebugInfo(`[EDGE FUNCTION] Apps Script Message: ${appsScriptData.message}`);
         
-        if (result.data.attachments > 0) {
-          addDebugInfo(`[DIRECT TEST] 🎉 Successfully processed ${result.data.attachments} attachments!`);
+        if (appsScriptData.data) {
+          addDebugInfo('[EDGE FUNCTION] Apps Script Data:');
+          addDebugInfo(`- Processed: ${appsScriptData.data.processed}`);
+          addDebugInfo(`- Attachments: ${appsScriptData.data.attachments}`);
+          addDebugInfo(`- Files: ${appsScriptData.data.files?.length || 0}`);
+          addDebugInfo(`- Errors: ${appsScriptData.data.errors?.length || 0}`);
           
-          if (result.data.files && result.data.files.length > 0) {
-            addDebugInfo('[DIRECT TEST] Saved files:');
-            result.data.files.forEach((file: any, index: number) => {
-              addDebugInfo(`[DIRECT TEST] ${index + 1}. ${file.name} (${file.size} bytes)`);
-              addDebugInfo(`[DIRECT TEST]    Drive URL: ${file.url}`);
-            });
+          if (appsScriptData.data.attachments > 0) {
+            addDebugInfo(`[EDGE FUNCTION] 🎉 Successfully processed ${appsScriptData.data.attachments} attachments!`);
+            
+            if (appsScriptData.data.files && appsScriptData.data.files.length > 0) {
+              addDebugInfo('[EDGE FUNCTION] Saved files:');
+              appsScriptData.data.files.forEach((file: any, index: number) => {
+                addDebugInfo(`[EDGE FUNCTION] ${index + 1}. ${file.name} (${file.size} bytes)`);
+                addDebugInfo(`[EDGE FUNCTION]    Drive URL: ${file.url}`);
+              });
+              
+              toast({
+                title: "🎉 Edge Function Success!",
+                description: `Processed ${appsScriptData.data.attachments} attachments via Edge Function proxy`,
+              });
+            }
+          } else {
+            addDebugInfo('[EDGE FUNCTION] ⚠️ No attachments were processed');
             
             toast({
-              title: "🎉 Direct Test Success!",
-              description: `Processed ${result.data.attachments} attachments and saved them to Drive folder "${payload.userConfig.driveFolder}"`,
+              title: "⚠️ No Attachments Found",
+              description: "Edge Function worked, but no matching emails with attachments were found.",
             });
           }
-        } else {
-          addDebugInfo('[DIRECT TEST] ⚠️ No attachments were processed');
-          addDebugInfo('[DIRECT TEST] This might mean no matching emails were found');
-          
-          toast({
-            title: "⚠️ No Attachments Found",
-            description: "The direct test worked, but no matching emails with attachments were found.",
-          });
         }
+        
+        return appsScriptData;
+      } else {
+        addDebugInfo(`[EDGE FUNCTION] Unexpected response format: ${JSON.stringify(result)}`, true);
+        throw new Error('Unexpected response format from Edge Function');
       }
-      
-      return result;
 
     } catch (error) {
-      addDebugInfo(`[DIRECT TEST] ❌ Failed: ${error.message}`, true);
+      addDebugInfo(`[EDGE FUNCTION] ❌ Failed: ${error.message}`, true);
       
       toast({
-        title: "🔴 Direct Test Failed",
+        title: "🔴 Edge Function Failed",
         description: `Error: ${error.message}`,
         variant: "destructive"
       });
       
       throw error;
     }
-  }, [addDebugInfo, toast, user?.id]);
+  }, [addDebugInfo, toast, user?.id, session]);
 
   const runFlow = useCallback(async (flow: UserFlow) => {
-    addDebugInfo(`🚀 === STARTING DIRECT TEST FOR FLOW: ${flow.flow_name} ===`);
+    addDebugInfo(`🚀 === STARTING EDGE FUNCTION TEST FOR FLOW: ${flow.flow_name} ===`);
     setAuthError(null);
     setRunningFlows(prev => new Set(prev).add(flow.id));
 
@@ -194,11 +204,11 @@ export const useFlowOperations = (
       addDebugInfo(`👤 User ID: ${session.user?.id}`);
       addDebugInfo(`📧 User Email: ${session.user?.email}`);
 
-      // Step 2: Run direct Apps Script test
-      addDebugInfo("📋 Step 2: Running direct Apps Script test");
-      const result = await testDirectAppsScript(flow.id);
+      // Step 2: Run Edge Function test
+      addDebugInfo("📋 Step 2: Running Edge Function test");
+      const result = await testEdgeFunction(flow.id);
 
-      addDebugInfo(`✅ === DIRECT TEST COMPLETED SUCCESSFULLY ===`);
+      addDebugInfo(`✅ === EDGE FUNCTION TEST COMPLETED SUCCESSFULLY ===`);
       addDebugInfo(`🎉 Flow execution completed!`);
 
       if (result && result.data && result.data.attachments > 0) {
@@ -213,16 +223,16 @@ export const useFlowOperations = (
         });
       }
 
-      addDebugInfo(`🏁 === DIRECT TEST FLOW EXECUTION COMPLETED ===`);
+      addDebugInfo(`🏁 === EDGE FUNCTION FLOW EXECUTION COMPLETED ===`);
 
     } catch (error) {
-      addDebugInfo(`💥 === DIRECT TEST ERROR ===`, true);
+      addDebugInfo(`💥 === EDGE FUNCTION ERROR ===`, true);
       addDebugInfo(`🔍 Error: ${error.message}`, true);
       addDebugInfo(`🔍 Error type: ${error.constructor.name}`, true);
       
       toast({
-        title: "🔴 Direct Test Error",
-        description: `Direct test error: ${error.message}`,
+        title: "🔴 Edge Function Error",
+        description: `Edge Function error: ${error.message}`,
         variant: "destructive"
       });
     } finally {
@@ -232,7 +242,7 @@ export const useFlowOperations = (
         return newSet;
       });
     }
-  }, [session, addDebugInfo, toast, testDirectAppsScript]);
+  }, [session, addDebugInfo, toast, testEdgeFunction]);
 
   const deleteFlow = useCallback(async (flowId: string) => {
     addDebugInfo(`🗑️ Starting flow deletion: ${flowId}`);
