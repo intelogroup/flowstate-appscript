@@ -123,7 +123,7 @@ const FlowManager = React.memo(() => {
 
   // Check if user has Google authentication
   const hasGoogleAuth = useMemo(() => 
-    session?.provider_token || session?.access_token, 
+    !!(session?.provider_token || session?.access_token), 
     [session?.provider_token, session?.access_token]
   );
 
