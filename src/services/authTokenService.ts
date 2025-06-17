@@ -30,7 +30,7 @@ export class AuthTokenService {
     };
 
     const { error } = await supabase
-      .from('auth_tokens')
+      .from('user_auth_tokens')
       .upsert(tokenData, { 
         onConflict: 'user_id',
         ignoreDuplicates: false 
@@ -46,7 +46,7 @@ export class AuthTokenService {
 
   static async getTokens(userId: string): Promise<AuthToken | null> {
     const { data, error } = await supabase
-      .from('auth_tokens')
+      .from('user_auth_tokens')
       .select('*')
       .eq('user_id', userId)
       .single();
@@ -60,12 +60,12 @@ export class AuthTokenService {
       throw error;
     }
 
-    return data;
+    return data as AuthToken;
   }
 
   static async deleteTokens(userId: string): Promise<void> {
     const { error } = await supabase
-      .from('auth_tokens')
+      .from('user_auth_tokens')
       .delete()
       .eq('user_id', userId);
 
