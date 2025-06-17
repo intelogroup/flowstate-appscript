@@ -40,7 +40,20 @@ const FlowManager = () => {
   };
 
   const handleExecuteFlow = async (flowId: string) => {
+    console.log('[FLOW MANAGER] 🎯 Flow execution requested:', {
+      flowId,
+      userId: user?.id,
+      isGoogleConnected,
+      userFlowsCount: userFlows?.length || 0
+    });
+
     if (!user || !isGoogleConnected) {
+      console.error('[FLOW MANAGER] ❌ Authentication check failed:', {
+        hasUser: !!user,
+        isGoogleConnected,
+        userId: user?.id
+      });
+      
       toast({
         title: "Authentication Required",
         description: "Please connect your Google account to run flows.",
@@ -51,6 +64,11 @@ const FlowManager = () => {
 
     const flow = userFlows?.find(f => f.id === flowId);
     if (!flow) {
+      console.error('[FLOW MANAGER] ❌ Flow not found:', {
+        requestedFlowId: flowId,
+        availableFlows: userFlows?.map(f => ({ id: f.id, name: f.flow_name })) || []
+      });
+      
       toast({
         title: "Flow Not Found",
         description: "The selected flow could not be found.",
@@ -58,6 +76,14 @@ const FlowManager = () => {
       });
       return;
     }
+
+    console.log('[FLOW MANAGER] ✅ Flow found, preparing execution:', {
+      flowId: flow.id,
+      flowName: flow.flow_name,
+      emailFilter: flow.email_filter,
+      driveFolder: flow.drive_folder,
+      userId: flow.user_id
+    });
 
     const userFlow: UserFlow = {
       id: flow.id,
@@ -74,17 +100,33 @@ const FlowManager = () => {
       google_refresh_token: flow.google_refresh_token
     };
 
+    console.log('[FLOW MANAGER] 🚀 Starting flow execution with UserFlow object:', userFlow);
+
     toast({
       title: "Flow Started",
       description: `"${flow.flow_name}" is now processing...`,
     });
 
     try {
+      console.log('[FLOW MANAGER] 📞 Calling executeFlow...');
       const result = await executeFlow(userFlow);
+      
+      console.log('[FLOW MANAGER] 📥 Flow execution completed:', {
+        success: result?.success,
+        hasData: !!result?.data,
+        hasError: !!result?.error,
+        result
+      });
       
       if (result?.success) {
         const attachments = result.data?.attachments || 0;
         const emails = result.data?.processedEmails || 0;
+        
+        console.log('[FLOW MANAGER] ✅ Flow execution successful:', {
+          flowName: flow.flow_name,
+          attachments,
+          emails
+        });
         
         toast({
           title: "Flow Completed",
@@ -92,6 +134,12 @@ const FlowManager = () => {
         });
       } else {
         const errorMsg = result?.error || 'Flow execution failed';
+        console.error('[FLOW MANAGER] ❌ Flow execution failed:', {
+          flowName: flow.flow_name,
+          error: errorMsg,
+          fullResult: result
+        });
+        
         toast({
           title: "Flow Failed",
           description: errorMsg,
@@ -99,7 +147,13 @@ const FlowManager = () => {
         });
       }
     } catch (error) {
-      console.error('Flow execution error:', error);
+      console.error('[FLOW MANAGER] 💥 Flow execution exception:', {
+        flowName: flow.flow_name,
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        stack: error instanceof Error ? error.stack : 'No stack trace'
+      });
+      
       toast({
         title: "Flow Error",
         description: error instanceof Error ? error.message : 'An unexpected error occurred',
