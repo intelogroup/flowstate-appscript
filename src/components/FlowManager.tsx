@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
@@ -8,15 +8,26 @@ import { useFlowExecutor } from '@/hooks/flow-execution/useFlowExecutor';
 import { useFlowLogs } from '@/hooks/useFlowLogs';
 import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import FlowsTabContent from '@/components/flow/FlowsTabContent';
+import FlowFormCard from '@/components/app/FlowFormCard';
 import type { UserFlow } from '@/hooks/flow-execution/types';
 
 const FlowManager = () => {
   const { user, isGoogleConnected } = useAuth();
-  const { userFlows, isLoading, refetch, deleteFlow } = useFlowManagement();
+  const { userFlows, isLoading, refetch, deleteFlow, createFlow } = useFlowManagement();
   const { addLog } = useFlowLogs();
   const [activeTab, setActiveTab] = useState('flows');
 
   const { runningFlows, executeFlow } = useFlowExecutor({ addLog });
+
+  const handleCreateFlow = async (flowData: any) => {
+    try {
+      await createFlow(flowData);
+      setActiveTab('flows'); // Switch to flows tab after successful creation
+    } catch (error) {
+      console.error('Failed to create flow:', error);
+      // Error handling is already done in useFlowManagement
+    }
+  };
 
   const handleExecuteFlow = async (flowId: string) => {
     if (!user || !isGoogleConnected) {
@@ -59,12 +70,22 @@ const FlowManager = () => {
       <AuthStatusAlert />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="flows">My Flows</TabsTrigger>
-          <TabsTrigger value="create">Create Flow</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 bg-white shadow-sm border">
+          <TabsTrigger 
+            value="flows" 
+            className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:border-blue-200"
+          >
+            My Flows
+          </TabsTrigger>
+          <TabsTrigger 
+            value="create"
+            className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:border-blue-200"
+          >
+            Create Flow
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="flows" className="space-y-4">
+        <TabsContent value="flows" className="space-y-4 mt-6">
           <FlowsTabContent
             isLoading={isLoading}
             userFlows={userFlows}
@@ -77,18 +98,8 @@ const FlowManager = () => {
           />
         </TabsContent>
 
-        <TabsContent value="create">
-          <Card>
-            <CardHeader>
-              <CardTitle>Create New Flow</CardTitle>
-              <CardDescription>
-                Set up a new automated flow to save Gmail attachments to Google Drive
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-500">Flow creation form will be implemented here.</p>
-            </CardContent>
-          </Card>
+        <TabsContent value="create" className="mt-6">
+          <FlowFormCard onFlowCreate={handleCreateFlow} />
         </TabsContent>
       </Tabs>
     </div>

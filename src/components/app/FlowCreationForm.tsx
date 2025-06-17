@@ -5,13 +5,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { CheckCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 interface FlowCreationFormProps {
-  onSubmit: (flowData: any) => void;
+  onSubmit: (flowData: any) => Promise<void>;
 }
 
 const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [flowData, setFlowData] = useState({
     flowName: '',
     senders: '',
@@ -26,33 +29,58 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
       ...prev,
       [field]: value
     }));
+    // Clear error when user starts typing
+    if (formError) setFormError(null);
+  };
+
+  const validateForm = () => {
+    if (!flowData.flowName.trim()) {
+      setFormError('Flow name is required');
+      return false;
+    }
+    if (!flowData.senders.trim()) {
+      setFormError('At least one email sender is required');
+      return false;
+    }
+    if (!flowData.driveFolder.trim()) {
+      setFormError('Google Drive folder is required');
+      return false;
+    }
+    return true;
   };
 
   const handleSubmit = async () => {
-    if (!flowData.flowName || !flowData.senders || !flowData.driveFolder) {
-      return;
+    if (!validateForm()) return;
+
+    setIsLoading(true);
+    setFormError(null);
+
+    try {
+      // Convert senders to email filter format for backend compatibility
+      const emailFilter = `from:(${flowData.senders}) has:attachment`;
+      
+      const submissionData = {
+        ...flowData,
+        emailFilter, // Backend expects emailFilter
+        senders: flowData.senders // Keep original senders for display
+      };
+
+      await onSubmit(submissionData);
+      
+      // Reset form on successful submission
+      setFlowData({
+        flowName: '',
+        senders: '',
+        driveFolder: '',
+        fileTypes: [],
+        autoRun: false,
+        frequency: 'daily'
+      });
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Failed to create flow');
+    } finally {
+      setIsLoading(false);
     }
-
-    // Convert senders to email filter format for backend compatibility
-    const emailFilter = `from:(${flowData.senders}) has:attachment`;
-    
-    const submissionData = {
-      ...flowData,
-      emailFilter, // Backend still expects emailFilter
-      senders: flowData.senders // Keep original senders for display
-    };
-
-    await onSubmit(submissionData);
-    
-    // Reset form
-    setFlowData({
-      flowName: '',
-      senders: '',
-      driveFolder: '',
-      fileTypes: [],
-      autoRun: false,
-      frequency: 'daily'
-    });
   };
 
   // Apps Script compatible frequency options
@@ -68,52 +96,74 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
     { value: 'daily', label: 'Daily' }
   ];
 
+  const isFormValid = flowData.flowName.trim() && flowData.senders.trim() && flowData.driveFolder.trim();
+
   return (
     <div className="space-y-6">
+      {/* Error Alert */}
+      {formError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Flow Name */}
       <div className="space-y-2">
-        <Label htmlFor="flowName">Flow Name *</Label>
+        <Label htmlFor="flowName" className="text-sm font-medium">
+          Flow Name *
+        </Label>
         <Input
           id="flowName"
           placeholder="e.g., Invoice Attachments"
           value={flowData.flowName}
           onChange={(e) => updateFlowData('flowName', e.target.value)}
-          className="border-gray-200 focus:border-blue-500"
+          className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
         />
       </div>
 
       {/* Email Senders */}
       <div className="space-y-2">
-        <Label htmlFor="senders">Email Sender(s) *</Label>
+        <Label htmlFor="senders" className="text-sm font-medium">
+          Email Sender(s) *
+        </Label>
         <Input
           id="senders"
           placeholder="e.g., invoices@company.com or invoices@company.com, billing@supplier.com"
           value={flowData.senders}
           onChange={(e) => updateFlowData('senders', e.target.value)}
-          className="border-gray-200 focus:border-blue-500"
+          className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
         />
-        <p className="text-sm text-gray-500">
+        <p className="text-xs text-gray-500">
           Enter one or multiple email addresses separated by commas. We'll automatically look for emails with attachments.
         </p>
       </div>
 
       {/* Drive Folder */}
       <div className="space-y-2">
-        <Label htmlFor="driveFolder">Google Drive Folder *</Label>
+        <Label htmlFor="driveFolder" className="text-sm font-medium">
+          Google Drive Folder *
+        </Label>
         <Input
           id="driveFolder"
           placeholder="e.g., /Business/Invoices"
           value={flowData.driveFolder}
           onChange={(e) => updateFlowData('driveFolder', e.target.value)}
-          className="border-gray-200 focus:border-blue-500"
+          className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
         />
       </div>
 
       {/* File Types */}
       <div className="space-y-2">
-        <Label>File Types to Process</Label>
-        <Select onValueChange={(value) => updateFlowData('fileTypes', value === 'all' ? [] : [value])}>
-          <SelectTrigger className="border-gray-200 focus:border-blue-500">
+        <Label className="text-sm font-medium">File Types to Process</Label>
+        <Select 
+          onValueChange={(value) => updateFlowData('fileTypes', value === 'all' ? [] : [value])}
+          disabled={isLoading}
+        >
+          <SelectTrigger className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             <SelectValue placeholder="Select file types" />
           </SelectTrigger>
           <SelectContent>
@@ -126,28 +176,30 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
       </div>
 
       {/* Auto Run Toggle */}
-      <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+      <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg bg-gray-50/30">
         <div className="space-y-1">
-          <Label>Auto-run Flow</Label>
-          <p className="text-sm text-gray-500">
+          <Label className="text-sm font-medium">Auto-run Flow</Label>
+          <p className="text-xs text-gray-500">
             Automatically process new emails at regular intervals
           </p>
         </div>
         <Switch
           checked={flowData.autoRun}
           onCheckedChange={(checked) => updateFlowData('autoRun', checked)}
+          disabled={isLoading}
         />
       </div>
 
       {/* Frequency */}
       {flowData.autoRun && (
         <div className="space-y-2">
-          <Label>Run Frequency</Label>
+          <Label className="text-sm font-medium">Run Frequency</Label>
           <Select 
             value={flowData.frequency}
             onValueChange={(value) => updateFlowData('frequency', value)}
+            disabled={isLoading}
           >
-            <SelectTrigger className="border-gray-200 focus:border-blue-500">
+            <SelectTrigger className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -161,18 +213,27 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         </div>
       )}
 
-      {/* Set Flow Button */}
+      {/* Submit Button */}
       <Button 
         onClick={handleSubmit}
-        className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
+        className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 transition-all duration-200"
         size="lg"
-        disabled={!flowData.flowName || !flowData.senders || !flowData.driveFolder}
+        disabled={!isFormValid || isLoading}
       >
-        <CheckCircle className="w-5 h-5 mr-2" />
-        Set Flow
+        {isLoading ? (
+          <>
+            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+            Creating Flow...
+          </>
+        ) : (
+          <>
+            <CheckCircle className="w-5 h-5 mr-2" />
+            Create Flow
+          </>
+        )}
       </Button>
 
-      <p className="text-center text-sm text-gray-500">
+      <p className="text-center text-xs text-gray-500">
         Your flow will automatically save email attachments to Google Drive
       </p>
     </div>
