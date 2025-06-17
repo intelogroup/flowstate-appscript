@@ -7,6 +7,7 @@ import { useTokenValidation } from './auth/useTokenValidation';
 import { useGoogleConnection } from './auth/useGoogleConnection';
 import { useAuthActions } from './auth/useAuthActions';
 import { useEnhancedTokenManagement } from './auth/useEnhancedTokenManagement';
+import { AuthTokenService } from '@/services/authTokenService';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -47,12 +48,12 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     forceTokenRefresh
   );
 
-  // Set up auth state listener with enhanced token handling
+  // Set up auth state listener with enhanced token handling and token saving
   useEffect(() => {
     mountedRef.current = true;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         if (!mountedRef.current) return;
 
         console.log('[AUTH] Auth state change:', event, {
@@ -66,10 +67,19 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Enhanced auth event handling
+        // Enhanced auth event handling with token saving
         if (event === 'SIGNED_IN' && session) {
           setAuthError(null);
           console.log('[AUTH] User signed in successfully');
+          
+          // Save tokens to database
+          try {
+            await AuthTokenService.saveTokens(session);
+            console.log('[AUTH] Tokens saved to database on sign in');
+          } catch (error) {
+            console.error('[AUTH] Failed to save tokens on sign in:', error);
+            // Don't fail sign in for this, just log it
+          }
           
           // Schedule proactive token refresh
           scheduleTokenRefresh(session);
@@ -79,11 +89,30 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
           console.log('[AUTH] User signed out');
           setAuthError(null);
           cleanup(); // Clean up scheduled refreshes
+          
+          // Clean up saved tokens on sign out
+          if (session?.user?.id) {
+            try {
+              await AuthTokenService.deleteTokens(session.user.id);
+              console.log('[AUTH] Tokens cleaned up on sign out');
+            } catch (error) {
+              console.error('[AUTH] Failed to clean up tokens on sign out:', error);
+            }
+          }
         }
 
         if (event === 'TOKEN_REFRESHED' && session) {
           console.log('[AUTH] Token refreshed via auth state change');
           setAuthError(null);
+          
+          // Save refreshed tokens
+          try {
+            await AuthTokenService.saveTokens(session);
+            console.log('[AUTH] Refreshed tokens saved to database');
+          } catch (error) {
+            console.error('[AUTH] Failed to save refreshed tokens:', error);
+          }
+          
           scheduleTokenRefresh(session);
         }
 

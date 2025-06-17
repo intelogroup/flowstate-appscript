@@ -2,6 +2,7 @@
 import { useCallback, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { AuthTokenService } from '@/services/authTokenService';
 
 export const useEnhancedTokenManagement = (
   setSession: (session: Session | null) => void,
@@ -51,6 +52,14 @@ export const useEnhancedTokenManagement = (
           hasProviderToken: !!data.session.provider_token,
           expiresAt: new Date((data.session.expires_at || 0) * 1000).toISOString()
         });
+        
+        // Save refreshed tokens to database
+        try {
+          await AuthTokenService.saveTokens(data.session);
+        } catch (saveError) {
+          console.error('[AUTH] Failed to save refreshed tokens:', saveError);
+          // Don't fail the refresh for this, just log it
+        }
         
         setSession(data.session);
         setUser(data.session.user);
