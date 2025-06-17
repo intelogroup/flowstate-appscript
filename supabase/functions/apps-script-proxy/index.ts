@@ -6,11 +6,19 @@ import { RequestBody } from "./types.ts"
 import { getUserEmail } from "./user-service.ts"
 import { callAppsScript } from "./apps-script-client.ts"
 import { buildAppsScriptPayload } from "./payload-builder.ts"
+import { processAppsScriptResponse } from "./response-processor.ts"
 
 serve(async (req) => {
   const debugInfo = extractDebugInfo(req);
   const startTime = Date.now();
   logNetworkEvent('REQUEST_RECEIVED', debugInfo);
+
+  console.log('[EDGE FUNCTION] 🚀 Edge Function started with enhanced logging:', {
+    method: req.method,
+    url: req.url,
+    debugInfo,
+    timestamp: new Date().toISOString()
+  });
 
   // Log all request headers for auth debugging
   const headers = Object.fromEntries(req.headers.entries());
@@ -26,6 +34,7 @@ serve(async (req) => {
 
   if (req.method === 'OPTIONS') {
     logNetworkEvent('CORS_PREFLIGHT', { request_id: debugInfo.request_id });
+    console.log('[EDGE FUNCTION] 🔄 Handling CORS preflight request');
     return handleCorsPrelight();
   }
 
@@ -78,6 +87,16 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
+    console.log('[EDGE FUNCTION] 🔧 Environment variables check:', {
+      hasAppsScriptUrl: !!appsScriptUrl,
+      hasAppsScriptSecret: !!appsScriptSecret,
+      hasSupabaseUrl: !!supabaseUrl,
+      hasSupabaseServiceKey: !!supabaseServiceKey,
+      appsScriptUrlLength: appsScriptUrl?.length || 0,
+      request_id: debugInfo.request_id,
+      timestamp: new Date().toISOString()
+    });
+
     // Enhanced environment validation
     if (!appsScriptUrl || !appsScriptSecret) {
       logNetworkEvent('CONFIG_ERROR', {
@@ -114,6 +133,14 @@ serve(async (req) => {
         request_id: debugInfo.request_id 
       });
 
+      console.log('[EDGE FUNCTION] 📖 Request body received:', {
+        bodyLength: bodyText.length,
+        bodyPreview: bodyText.substring(0, 500),
+        isEmpty: bodyText.trim().length === 0,
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
+
       if (!bodyText || bodyText.trim().length === 0) {
         return createCorsResponse({
           error: 'Empty request body received',
@@ -123,6 +150,16 @@ serve(async (req) => {
 
       originalPayload = JSON.parse(bodyText);
       
+      console.log('[EDGE FUNCTION] 📋 Parsed request payload:', {
+        parsedPayload: JSON.stringify(originalPayload, null, 2),
+        hasAction: !!originalPayload.action,
+        action: originalPayload.action,
+        hasUserId: !!originalPayload.user_id,
+        hasUserConfig: !!originalPayload.userConfig,
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
+
       // Enhanced payload validation
       if (!originalPayload.action) {
         return createCorsResponse({
@@ -146,6 +183,11 @@ serve(async (req) => {
         request_id: debugInfo.request_id
       });
     } catch (error) {
+      console.error('[EDGE FUNCTION] 💥 Payload parsing error:', {
+        error: error.message,
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
       logNetworkEvent('PARSE_ERROR', { 
         error: error.message, 
         request_id: debugInfo.request_id 
@@ -204,6 +246,7 @@ serve(async (req) => {
     }
 
     // Create payload for Apps Script using shared secret authentication
+    console.log('[EDGE FUNCTION] 🔧 Building Apps Script payload...');
     const appsScriptPayload = buildAppsScriptPayload(
       originalPayload,
       userEmail,
@@ -254,25 +297,22 @@ serve(async (req) => {
         request_id: debugInfo.request_id
       });
 
-      // Return successful response with enhanced debugging
-      return createCorsResponse({
-        success: true,
-        message: `Flow processed successfully using shared secret authentication`,
+      // Process the response using the new response processor
+      const processedResponse = processAppsScriptResponse(
+        appsScriptData,
+        userEmail,
+        debugInfo.request_id,
+        totalDuration
+      );
+
+      console.log('[EDGE FUNCTION] 📤 Returning processed response:', {
+        responseType: processedResponse.success ? 'success' : 'error',
+        hasAppsScriptResponse: !!processedResponse.apps_script_response,
         request_id: debugInfo.request_id,
-        auth_method: 'shared-secret',
-        user_email: userEmail,
-        performance_metrics: {
-          total_duration: totalDuration
-        },
-        apps_script_response: appsScriptData,
-        debug_info: {
-          user_id: originalPayload.user_id,
-          user_email: userEmail,
-          flow_name: originalPayload.userConfig?.flowName,
-          drive_folder: originalPayload.userConfig?.driveFolder,
-          auth_headers_received: !!authHeader
-        }
-      }, 200);
+        timestamp: new Date().toISOString()
+      });
+
+      return createCorsResponse(processedResponse, 200);
 
     } catch (appsScriptError) {
       const totalDuration = Date.now() - startTime;
