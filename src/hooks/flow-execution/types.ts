@@ -25,10 +25,23 @@ export interface FlowExecutionHookReturn {
   checkConnectivity: () => Promise<boolean>;
 }
 
-export interface ExecuteFlowAttemptOptions {
+export interface FlowExecutorConfig {
+  maxRetries: number;
+  retryDelay: number;
+  timeoutDuration: number;
+}
+
+export interface ExecutionContext {
   flow: UserFlow;
   attemptNumber: number;
-  addLog: (message: string, isError?: boolean, performanceData?: any) => void;
-  session: any;
-  getGoogleOAuthToken: () => Promise<string | null>;
+  startTime: number;
+  config: FlowExecutorConfig;
+}
+
+export interface LogEntry {
+  id: string;
+  message: string;
+  timestamp: Date;
+  isError?: boolean;
+  performanceData?: any;
 }

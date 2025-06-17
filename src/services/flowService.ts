@@ -2,13 +2,23 @@
 import { supabase } from '@/integrations/supabase/client';
 import { CreateFlowData, FlowConfig, FlowExecutionResult } from './types/flowTypes';
 import { FlowExecutionService } from './flowExecution';
+import { FlowValidationService } from './flowValidation';
 
 export class FlowService {
   static async executeFlow(
     flowId: string,
     userConfig: FlowConfig
   ): Promise<FlowExecutionResult> {
-    return FlowExecutionService.executeFlow(flowId, userConfig);
+    const validation = FlowValidationService.validateConfig(userConfig);
+    if (!validation.isValid) {
+      return {
+        success: false,
+        error: `Validation failed: ${validation.errors.join(', ')}`
+      };
+    }
+
+    const sanitizedConfig = FlowValidationService.sanitizeConfig(userConfig);
+    return FlowExecutionService.executeFlow(flowId, sanitizedConfig);
   }
 
   static async fetchUserFlows(userId: string) {
@@ -56,5 +66,4 @@ export class FlowService {
   }
 }
 
-// Re-export types for backwards compatibility
 export type { FlowConfig, FlowExecutionResult, CreateFlowData };

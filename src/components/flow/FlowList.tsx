@@ -1,17 +1,7 @@
 
 import React from 'react';
 import FlowCard from './FlowCard';
-
-interface UserFlow {
-  id: string;
-  flow_name: string;
-  email_filter: string;
-  drive_folder: string;
-  file_types: string[];
-  auto_run: boolean;
-  frequency: string;
-  created_at: string;
-}
+import type { UserFlow } from '@/hooks/flow-execution/types';
 
 interface FlowListProps {
   flows: UserFlow[];

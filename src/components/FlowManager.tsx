@@ -9,6 +9,7 @@ import { useFlowLogs } from '@/hooks/useFlowLogs';
 import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import FlowsTabContent from '@/components/flow/FlowsTabContent';
 import FlowDebugSection from '@/components/flow/FlowDebugSection';
+import type { UserFlow } from '@/hooks/flow-execution/types';
 
 const FlowManager = () => {
   const { user, isGoogleConnected } = useAuth();
@@ -30,39 +31,22 @@ const FlowManager = () => {
       return;
     }
 
-    addLog(`🚀 Starting flow execution: ${flow.flow_name}`);
-    
-    try {
-      const result = await executeFlow({
-        id: flow.id,
-        flow_name: flow.flow_name,
-        email_filter: flow.email_filter,
-        drive_folder: flow.drive_folder,
-        file_types: flow.file_types,
-        auto_run: flow.auto_run,
-        frequency: flow.frequency,
-        user_id: flow.user_id,
-        created_at: flow.created_at,
-        updated_at: flow.updated_at,
-        senders: flow.senders,
-        google_refresh_token: flow.google_refresh_token
-      });
+    const userFlow: UserFlow = {
+      id: flow.id,
+      flow_name: flow.flow_name,
+      email_filter: flow.email_filter,
+      drive_folder: flow.drive_folder,
+      file_types: flow.file_types,
+      auto_run: flow.auto_run,
+      frequency: flow.frequency,
+      user_id: flow.user_id,
+      created_at: flow.created_at,
+      updated_at: flow.updated_at,
+      senders: flow.senders,
+      google_refresh_token: flow.google_refresh_token
+    };
 
-      if (result?.success) {
-        const attachments = result.data?.attachments || 0;
-        const emails = result.data?.processedEmails || 0;
-        
-        addLog(
-          `✅ Flow "${flow.flow_name}" completed successfully! Processed ${attachments} attachments from ${emails} emails.`,
-          false,
-          result.data?.performance_metrics
-        );
-      } else {
-        addLog(`❌ Flow "${flow.flow_name}" failed: ${result?.error || 'Unknown error'}`, true);
-      }
-    } catch (error) {
-      addLog(`❌ Error executing flow "${flow.flow_name}": ${error instanceof Error ? error.message : 'Unknown error'}`, true);
-    }
+    await executeFlow(userFlow);
   };
 
   useEffect(() => {

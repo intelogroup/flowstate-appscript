@@ -3,18 +3,7 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Clock } from 'lucide-react';
 import FlowActions from './FlowActions';
-
-interface UserFlow {
-  id: string;
-  flow_name: string;
-  email_filter: string;
-  drive_folder: string;
-  file_types: string[];
-  auto_run: boolean;
-  frequency: string;
-  created_at: string;
-  senders?: string; // New field for display
-}
+import type { UserFlow } from '@/hooks/flow-execution/types';
 
 interface FlowCardProps {
   flow: UserFlow;
@@ -43,12 +32,10 @@ const FlowCard = React.memo(({
     onDelete(flow.id);
   }, [flow.id, onDelete]);
 
-  // Extract senders from email_filter for display or use the senders field
   const displaySenders = flow.senders || 
     (flow.email_filter?.match(/from:\((.*?)\)/)?.[1] || 
      flow.email_filter?.replace(/has:attachment/g, '').trim());
 
-  // Format frequency for display
   const getFrequencyLabel = (freq: string) => {
     const frequencyMap: Record<string, string> = {
       'minute': 'Every minute',

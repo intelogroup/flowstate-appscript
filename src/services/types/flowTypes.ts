@@ -33,3 +33,16 @@ export interface CreateFlowData {
   frequency: string;
   userId: string;
 }
+
+export interface FlowValidationResult {
+  isValid: boolean;
+  errors: string[];
+}
+
+export interface FlowExecutionMetrics {
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  attachmentsProcessed: number;
+  emailsProcessed: number;
+}

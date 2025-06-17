@@ -13,6 +13,6 @@ export const useFlowExecution = (): FlowExecutionHookReturn => {
     executeFlow,
     clearLogs,
     addLog,
-    checkConnectivity: async () => true // Simplified connectivity check
+    checkConnectivity: async () => true
   };
 };
