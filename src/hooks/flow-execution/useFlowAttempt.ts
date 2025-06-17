@@ -52,14 +52,14 @@ export const useFlowAttempt = () => {
     addLog(`📊 Token source: ${currentSession.provider_token ? 'provider_token (Google OAuth)' : 'access_token (fallback Google OAuth)'}`);
 
     try {
-      // Use the senders field for V.06 compatibility
+      // Simplified user config - let Apps Script handle time filtering
       const userConfig: FlowConfig = {
         senders: flow.senders || '', // Use the new senders field
         driveFolder: flow.drive_folder,
         fileTypes: flow.file_types || [],
         userId: flow.id,
         flowName: flow.flow_name,
-        maxEmails: 5, // Default to 5 emails for better performance
+        maxEmails: 10, // Let Apps Script decide the optimal number
         enableDebugMode: true, // Enable for better debugging
         showEmailDetails: true // Show email details in debug
       };
@@ -71,7 +71,7 @@ export const useFlowAttempt = () => {
         provider_token: googleOAuthToken || '' // Same as access_token for consistency
       };
 
-      addLog(`📋 Using V.06 payload format with senders: ${userConfig.senders}`);
+      addLog(`📋 Using simplified payload - Apps Script will handle time filtering`);
       addLog(`🔐 Google OAuth token prepared: ${googleTokens.access_token.substring(0, 20)}...`);
       
       const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
@@ -107,7 +107,7 @@ export const useFlowAttempt = () => {
             addLog(`🔍 Gmail search used: "${debugInfo.searchQuery}"`);
           }
           if (debugInfo.timeFilter) {
-            addLog(`⏰ Time filter applied: ${debugInfo.timeFilter}`);
+            addLog(`⏰ Time filter applied by Apps Script: ${debugInfo.timeFilter}`);
           }
           if (debugInfo.emailDetails && Array.isArray(debugInfo.emailDetails)) {
             debugInfo.emailDetails.forEach((email: any, index: number) => {
@@ -153,10 +153,10 @@ export const useFlowAttempt = () => {
       if (canRetry) {
         return null; // Signal that retry should happen
       } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
-        addLog(`⏱️ Flow timed out after ${Math.round(executionTime / 1000)}s - consider reducing email count`, true);
+        addLog(`⏱️ Flow timed out after ${Math.round(executionTime / 1000)}s - Apps Script will handle optimization`, true);
         toast({
           title: "⏱️ Flow Timeout",
-          description: "The flow took too long to complete. Try processing fewer emails at once.",
+          description: "The flow took too long to complete. Apps Script will optimize the search.",
           variant: "destructive"
         });
       } else {
