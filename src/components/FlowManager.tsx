@@ -8,32 +8,25 @@ import { useFlowExecutor } from '@/hooks/flow-execution/useFlowExecutor';
 import { useFlowLogs } from '@/hooks/useFlowLogs';
 import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import FlowsTabContent from '@/components/flow/FlowsTabContent';
-import FlowDebugSection from '@/components/flow/FlowDebugSection';
 import type { UserFlow } from '@/hooks/flow-execution/types';
 
 const FlowManager = () => {
   const { user, isGoogleConnected } = useAuth();
   const { userFlows, isLoading, refetch, deleteFlow } = useFlowManagement();
-  const { logs, performanceData, addLog } = useFlowLogs();
+  const { addLog } = useFlowLogs();
   const [activeTab, setActiveTab] = useState('flows');
 
   const { runningFlows, executeFlow } = useFlowExecutor({ addLog });
 
   const handleExecuteFlow = async (flowId: string) => {
-    console.log('[FLOW_MANAGER] Execute flow requested:', flowId);
-    
     if (!user || !isGoogleConnected) {
-      addLog('❌ Authentication required to execute flows', true);
       return;
     }
 
     const flow = userFlows?.find(f => f.id === flowId);
     if (!flow) {
-      addLog(`❌ Flow with ID ${flowId} not found`, true);
       return;
     }
-
-    console.log('[FLOW_MANAGER] Found flow:', flow.flow_name);
 
     const userFlow: UserFlow = {
       id: flow.id,
@@ -54,27 +47,19 @@ const FlowManager = () => {
   };
 
   const handleDeleteFlow = async (flowId: string) => {
-    console.log('[FLOW_MANAGER] Delete flow requested:', flowId);
     try {
       await deleteFlow(flowId);
-      addLog(`🗑️ Flow deleted successfully`);
     } catch (error) {
-      addLog(`❌ Failed to delete flow: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+      console.error('Failed to delete flow:', error);
     }
   };
-
-  useEffect(() => {
-    if (user && isGoogleConnected) {
-      addLog('🔐 Authenticated with Google - ready to execute flows');
-    }
-  }, [user, isGoogleConnected, addLog]);
 
   return (
     <div className="space-y-6">
       <AuthStatusAlert />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="flows">My Flows</TabsTrigger>
           <TabsTrigger value="create">Create Flow</TabsTrigger>
         </TabsList>
@@ -106,8 +91,6 @@ const FlowManager = () => {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <FlowDebugSection logs={logs} performanceData={performanceData} />
     </div>
   );
 };

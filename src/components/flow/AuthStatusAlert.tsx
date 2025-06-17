@@ -2,41 +2,29 @@
 import React from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { CheckCircle, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
 const AuthStatusAlert = React.memo(() => {
-  const { user, isGoogleConnected, authError, refreshSession } = useAuth();
+  const { user, isGoogleConnected, authError } = useAuth();
 
   // Authentication Error
   if (authError) {
     return (
-      <Alert variant="destructive">
+      <Alert variant="destructive" className="border-red-200 bg-red-50">
         <AlertCircle className="h-4 w-4" />
         <AlertDescription className="flex items-center justify-between">
           <div>
-            <p className="font-medium">Authentication Issue</p>
-            <p className="text-sm">{authError}</p>
+            <p className="font-medium">Connection Issue</p>
+            <p className="text-sm text-red-700">Please sign in again to continue</p>
           </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={refreshSession}
-              className="whitespace-nowrap"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Retry
+          <Link to="/auth">
+            <Button size="sm" variant="outline" className="bg-white hover:bg-red-50">
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Sign In
             </Button>
-            <Link to="/auth">
-              <Button size="sm" variant="outline">
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Re-authenticate
-              </Button>
-            </Link>
-          </div>
+          </Link>
         </AlertDescription>
       </Alert>
     );
@@ -45,22 +33,19 @@ const AuthStatusAlert = React.memo(() => {
   // No Google Auth
   if (!user || !isGoogleConnected) {
     return (
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
+      <Alert className="border-blue-200 bg-blue-50">
+        <AlertCircle className="h-4 w-4 text-blue-600" />
         <AlertDescription className="flex items-center justify-between">
           <div>
-            <p className="font-medium">Google authentication required</p>
-            <p className="text-sm text-gray-600">
-              {!user 
-                ? "Sign in and connect with Google to access Gmail and Drive" 
-                : "Connect your Google account to access Gmail and Drive"
-              }
+            <p className="font-medium text-blue-900">Connect with Google</p>
+            <p className="text-sm text-blue-700">
+              Sign in with Google to create and run your automation flows
             </p>
           </div>
           <Link to="/auth">
-            <Button size="sm" variant="outline">
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
               <ExternalLink className="w-4 h-4 mr-2" />
-              {!user ? "Sign in with Google" : "Connect Google"}
+              Connect Google
             </Button>
           </Link>
         </AlertDescription>
@@ -68,30 +53,21 @@ const AuthStatusAlert = React.memo(() => {
     );
   }
 
-  // Success Status
+  // Success Status - minimal and clean
   return (
-    <Alert>
-      <CheckCircle className="h-4 w-4" />
+    <Alert className="border-green-200 bg-green-50">
+      <CheckCircle className="h-4 w-4 text-green-600" />
       <AlertDescription>
         <div className="flex items-center justify-between">
           <div>
-            <p className="font-medium">✓ Connected to Google</p>
-            <p className="text-sm text-gray-600">Gmail and Drive access enabled</p>
+            <p className="font-medium text-green-900">Connected to Google</p>
+            <p className="text-sm text-green-700">Ready to create and run flows</p>
           </div>
           <div className="flex items-center space-x-2">
-            <Badge variant="secondary" className="bg-green-100 text-green-800">
+            <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
               <CheckCircle className="w-3 h-3 mr-1" />
-              Connected
-            </Badge>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={refreshSession}
-              className="p-2"
-              title="Refresh authentication"
-            >
-              <RefreshCw className="w-3 h-3" />
-            </Button>
+              Active
+            </span>
           </div>
         </div>
       </AlertDescription>

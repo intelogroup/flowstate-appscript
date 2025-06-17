@@ -1,19 +1,18 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 
 const AuthStatus = () => {
-  const { user, isGoogleConnected, refreshSession } = useAuth();
+  const { user, isGoogleConnected } = useAuth();
   
   if (!user) {
     return (
       <Link to="/auth">
-        <Badge variant="destructive" className="flex items-center space-x-1">
+        <Badge variant="outline" className="flex items-center space-x-1 hover:bg-gray-50">
           <AlertCircle className="w-3 h-3" />
-          <span>Not signed in</span>
+          <span>Sign In</span>
           <ExternalLink className="w-3 h-3" />
         </Badge>
       </Link>
@@ -22,43 +21,21 @@ const AuthStatus = () => {
 
   if (!isGoogleConnected) {
     return (
-      <div className="flex items-center space-x-2">
-        <Link to="/auth">
-          <Badge variant="secondary" className="flex items-center space-x-1">
-            <AlertCircle className="w-3 h-3" />
-            <span>Google auth required</span>
-            <ExternalLink className="w-3 h-3" />
-          </Badge>
-        </Link>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={refreshSession}
-          className="p-1 h-8 w-8"
-          title="Refresh authentication"
-        >
-          <RefreshCw className="w-3 h-3" />
-        </Button>
-      </div>
+      <Link to="/auth">
+        <Badge variant="outline" className="flex items-center space-x-1 hover:bg-blue-50 text-blue-700 border-blue-200">
+          <AlertCircle className="w-3 h-3" />
+          <span>Connect Google</span>
+          <ExternalLink className="w-3 h-3" />
+        </Badge>
+      </Link>
     );
   }
 
   return (
-    <div className="flex items-center space-x-2">
-      <Badge variant="secondary" className="flex items-center space-x-1 bg-green-100 text-green-800">
-        <CheckCircle className="w-3 h-3" />
-        <span>Google connected</span>
-      </Badge>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={refreshSession}
-        className="p-1 h-8 w-8"
-        title="Refresh authentication"
-      >
-        <RefreshCw className="w-3 h-3" />
-      </Button>
-    </div>
+    <Badge variant="outline" className="flex items-center space-x-1 bg-green-50 text-green-700 border-green-200">
+      <CheckCircle className="w-3 h-3" />
+      <span>Connected</span>
+    </Badge>
   );
 };
 
