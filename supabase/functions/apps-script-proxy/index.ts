@@ -4,8 +4,8 @@ import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/
 import { extractDebugInfo, logNetworkEvent, generateRequestId, createRetryableError } from "../_shared/network-utils.ts"
 
 interface FlowConfig {
-  senders?: string // V.06 compatible field
-  emailFilter?: string // Legacy field for backward compatibility
+  senders?: string
+  emailFilter?: string
   driveFolder: string
   fileTypes?: string[]
   userId?: string
@@ -25,124 +25,6 @@ interface RequestBody {
   debug_info?: any
 }
 
-// Enhanced timeout configuration
-const TIMEOUT_CONFIG = {
-  default: 60000,     // 60 seconds for normal operations
-  gmail_flow: 90000,  // 90 seconds for Gmail processing
-  simple: 30000       // 30 seconds for simple operations
-}
-
-// Retry configuration
-const RETRY_CONFIG = {
-  maxRetries: 3,
-  baseDelay: 2000,    // 2 seconds
-  maxDelay: 10000     // 10 seconds max
-}
-
-async function callAppsScriptWithRetry(
-  url: string, 
-  payload: any, 
-  debugInfo: any, 
-  timeoutMs: number = TIMEOUT_CONFIG.default
-): Promise<Response> {
-  let lastError: any;
-  
-  for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
-    try {
-      logNetworkEvent('RETRY_ATTEMPT', {
-        attempt,
-        timeout: timeoutMs,
-        request_id: debugInfo.request_id
-      });
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        logNetworkEvent('TIMEOUT_TRIGGERED', {
-          attempt,
-          timeout: timeoutMs,
-          request_id: debugInfo.request_id
-        });
-        controller.abort();
-      }, timeoutMs);
-
-      const startTime = Date.now();
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Supabase-Edge-Function/3.1',
-          'X-Request-ID': debugInfo.request_id,
-          'X-Attempt': attempt.toString()
-        },
-        body: JSON.stringify(payload),
-        redirect: 'follow',
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-      
-      const duration = Date.now() - startTime;
-      logNetworkEvent('REQUEST_SUCCESS', {
-        attempt,
-        duration,
-        status: response.status,
-        request_id: debugInfo.request_id
-      });
-
-      return response;
-
-    } catch (error) {
-      lastError = error;
-      const duration = Date.now() - performance.now();
-      
-      logNetworkEvent('REQUEST_FAILED', {
-        attempt,
-        error: error.message,
-        errorName: error.name,
-        duration,
-        request_id: debugInfo.request_id
-      });
-
-      // If it's an AbortError (timeout) and we have retries left
-      if (error.name === 'AbortError' && attempt < RETRY_CONFIG.maxRetries) {
-        const delay = Math.min(
-          RETRY_CONFIG.baseDelay * Math.pow(2, attempt - 1),
-          RETRY_CONFIG.maxDelay
-        );
-        
-        logNetworkEvent('RETRY_DELAY', {
-          attempt,
-          delay,
-          nextAttempt: attempt + 1,
-          request_id: debugInfo.request_id
-        });
-        
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-      
-      // For non-timeout errors or final attempt, throw immediately
-      throw error;
-    }
-  }
-  
-  throw lastError;
-}
-
-function getTimeoutForOperation(action: string, userConfig?: FlowConfig): number {
-  if (action === 'process_gmail_flow' || action === 'run_flow') {
-    const emailCount = userConfig?.maxEmails || 5;
-    // Dynamic timeout based on email count: 60s base + 10s per email (max 180s)
-    return Math.min(
-      TIMEOUT_CONFIG.gmail_flow + (emailCount * 10000),
-      180000
-    );
-  }
-  
-  return TIMEOUT_CONFIG.default;
-}
-
 serve(async (req) => {
   const debugInfo = extractDebugInfo(req);
   const startTime = Date.now();
@@ -157,45 +39,21 @@ serve(async (req) => {
   try {
     logNetworkEvent('FUNCTION_START', { request_id: debugInfo.request_id });
 
-    // Get environment variables with enhanced error reporting
+    // Get environment variables
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
     const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET')
 
     if (!appsScriptUrl) {
-      logNetworkEvent('CONFIG_ERROR', { 
-        error: 'APPS_SCRIPT_URL missing', 
-        request_id: debugInfo.request_id 
-      });
       return createCorsResponse({
         error: 'Configuration error: APPS_SCRIPT_URL not set',
-        request_id: debugInfo.request_id,
-        troubleshooting: {
-          message: 'Environment variable missing',
-          steps: [
-            '1. Set APPS_SCRIPT_URL in your Supabase Edge Function secrets',
-            '2. Use your Apps Script web app deployment URL',
-            '3. Format: https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
-          ]
-        }
+        request_id: debugInfo.request_id
       }, 500);
     }
 
     if (!appsScriptSecret) {
-      logNetworkEvent('CONFIG_ERROR', { 
-        error: 'APPS_SCRIPT_SECRET missing', 
-        request_id: debugInfo.request_id 
-      });
       return createCorsResponse({
         error: 'Configuration error: APPS_SCRIPT_SECRET not set',
-        request_id: debugInfo.request_id,
-        troubleshooting: {
-          message: 'Secret token missing',
-          steps: [
-            '1. Generate a secret using Apps Script PropertiesService',
-            '2. Store it as APPS_SCRIPT_SECRET in Supabase Edge Function secrets',
-            '3. Use the same secret in your Apps Script code for validation'
-          ]
-        }
+        request_id: debugInfo.request_id
       }, 500);
     }
 
@@ -205,51 +63,20 @@ serve(async (req) => {
       const bodyText = await req.text();
       logNetworkEvent('BODY_RECEIVED', { 
         size: bodyText.length, 
-        preview: bodyText.substring(0, 100),
         request_id: debugInfo.request_id 
       });
 
-      // Check for empty body specifically
       if (!bodyText || bodyText.trim().length === 0) {
-        logNetworkEvent('EMPTY_BODY_ERROR', { 
-          request_id: debugInfo.request_id,
-          headers: Object.fromEntries(req.headers.entries())
-        });
         return createCorsResponse({
           error: 'Empty request body received',
-          request_id: debugInfo.request_id,
-          troubleshooting: {
-            message: 'No payload data was sent with the request',
-            steps: [
-              '1. Verify the frontend is sending a valid JSON payload',
-              '2. Check if the request is being intercepted or modified',
-              '3. Ensure the Content-Type header is set to application/json',
-              '4. Try refreshing the page and attempting the request again'
-            ]
-          },
-          debug_info: {
-            method: req.method,
-            url: req.url,
-            headers: Object.fromEntries(req.headers.entries()),
-            body_length: bodyText.length
-          }
+          request_id: debugInfo.request_id
         }, 400);
-      }
-
-      if (bodyText.length > 1024 * 1024) { // 1MB limit
-        throw createRetryableError('Request payload too large (>1MB)', false);
       }
 
       originalPayload = JSON.parse(bodyText);
       logNetworkEvent('PAYLOAD_PARSED', {
         action: originalPayload.action,
-        flowId: originalPayload.flowId,
-        hasAccessToken: !!originalPayload.access_token,
-        hasAuthToken: !!originalPayload.auth_token,
-        hasUserConfig: !!originalPayload.userConfig,
-        hasGoogleTokens: !!originalPayload.googleTokens,
         flowName: originalPayload.userConfig?.flowName,
-        maxEmails: originalPayload.userConfig?.maxEmails,
         request_id: debugInfo.request_id
       });
     } catch (error) {
@@ -260,77 +87,44 @@ serve(async (req) => {
       return createCorsResponse({
         error: 'Invalid JSON in request body',
         details: error.message,
-        request_id: debugInfo.request_id,
-        troubleshooting: {
-          message: 'The request body could not be parsed as valid JSON',
-          steps: [
-            '1. Check that the frontend is sending valid JSON data',
-            '2. Verify there are no special characters breaking the JSON',
-            '3. Try using a different browser or clearing cache',
-            '4. Check the browser console for any errors'
-          ]
-        }
-      }, 400);
-    }
-
-    // Validate required fields
-    if (!originalPayload.action) {
-      return createCorsResponse({
-        error: 'Missing required field: action',
-        received: Object.keys(originalPayload),
         request_id: debugInfo.request_id
       }, 400);
     }
 
-    // CRITICAL FIX: Create the EXACT payload structure Apps Script V.06 expects
+    // SIMPLIFIED DEV MODE: Create minimal payload structure
     const bodyForGas = {
-      secret: appsScriptSecret,  // ← This is what Apps Script validates against SCRIPT_SECRET
-      payload: {                 // ← Everything else must be nested inside "payload"
-        action: 'process_gmail_flow',  // ← Always use this action for V.06
+      secret: appsScriptSecret,
+      payload: {
+        action: 'process_gmail_flow',
         userConfig: {
-          // Convert emailFilter to senders for V.06 compatibility
-          senders: originalPayload.userConfig?.emailFilter || 
-                   originalPayload.userConfig?.senders || 
-                   'jayveedz19@gmail.com',
+          senders: originalPayload.userConfig?.senders || 'jayveedz19@gmail.com',
           driveFolder: originalPayload.userConfig?.driveFolder || 'Email Attachments',
           fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
           flowName: originalPayload.userConfig?.flowName || 'Default Flow',
-          maxEmails: originalPayload.userConfig?.maxEmails || 5,
+          maxEmails: 10,
           enableDebugMode: true,
-          showEmailDetails: true
+          devMode: true // Signal to Apps Script that this is dev mode
         },
-        googleTokens: {
-          access_token: originalPayload.googleTokens?.access_token || originalPayload.access_token,
-          refresh_token: originalPayload.googleTokens?.refresh_token,
-          expires_at: originalPayload.googleTokens?.expires_at
-        },
+        // SIMPLIFIED: Don't pass any auth tokens - let Apps Script handle dev mode
         debug_info: {
-          ...debugInfo,
-          supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v6',
-          request_source: 'edge-function-enhanced-debug'
+          request_id: debugInfo.request_id,
+          dev_mode: true,
+          timestamp: new Date().toISOString()
         }
       }
     };
 
-    logNetworkEvent('CALLING_APPS_SCRIPT', {
+    logNetworkEvent('CALLING_APPS_SCRIPT_DEV_MODE', {
       url: appsScriptUrl,
-      action: bodyForGas.payload.action,
-      hasSecret: !!bodyForGas.secret,
-      hasUserConfig: !!bodyForGas.payload.userConfig,
-      senders: bodyForGas.payload.userConfig?.senders,
-      driveFolder: bodyForGas.payload.userConfig?.driveFolder,
+      senders: bodyForGas.payload.userConfig.senders,
+      driveFolder: bodyForGas.payload.userConfig.driveFolder,
       request_id: debugInfo.request_id,
-      payload_size: JSON.stringify(bodyForGas).length,
-      timeout: 140000,
-      maxEmails: bodyForGas.payload.userConfig?.maxEmails,
-      debugMode: true,
-      v6_structure: true  // ← This confirms we're using V.06 structure
+      devMode: true
     });
 
-    // Make the request to Apps Script
+    // Make simplified request to Apps Script
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 140000); // 140 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
     let response;
     try {
@@ -338,11 +132,10 @@ serve(async (req) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Supabase-Edge-Function/3.1',
-          'X-Request-ID': debugInfo.request_id
+          'X-Request-ID': debugInfo.request_id,
+          'X-Dev-Mode': 'true'
         },
-        body: JSON.stringify(bodyForGas),  // ← Send the nested structure
-        redirect: 'follow',
+        body: JSON.stringify(bodyForGas),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -350,13 +143,12 @@ serve(async (req) => {
       clearTimeout(timeoutId);
       logNetworkEvent('FETCH_ERROR', { 
         error: fetchError.message,
-        name: fetchError.name,
         request_id: debugInfo.request_id
       });
       
       if (fetchError.name === 'AbortError') {
         return createCorsResponse({
-          error: 'Apps Script request timeout (140s)',
+          error: 'Apps Script request timeout (60s)',
           request_id: debugInfo.request_id
         }, 504);
       }
@@ -367,61 +159,21 @@ serve(async (req) => {
     const totalDuration = Date.now() - startTime;
     logNetworkEvent('APPS_SCRIPT_RESPONSE', {
       status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
       request_id: debugInfo.request_id,
       total_duration: totalDuration
     });
 
     if (!response.ok) {
       const responseText = await response.text();
-      logNetworkEvent('APPS_SCRIPT_ERROR', {
-        status: response.status,
-        statusText: response.statusText,
-        body: responseText.substring(0, 500),
-        request_id: debugInfo.request_id,
-        total_duration: totalDuration
-      });
-
-      const isHtmlResponse = responseText.trim().startsWith('<!DOCTYPE') || 
-                           responseText.trim().startsWith('<html')
-
       return createCorsResponse({
-        error: `Apps Script error (${response.status}): ${
-          isHtmlResponse 
-            ? 'Apps Script deployment access issue - check deployment settings' 
-            : response.statusText || 'Unknown error'
-        }`,
+        error: `Apps Script error (${response.status})`,
         request_id: debugInfo.request_id,
-        apps_script_status: response.status,
         total_duration: totalDuration,
-        troubleshooting: {
-          message: isHtmlResponse 
-            ? 'Apps Script deployment needs proper access settings'
-            : 'Apps Script returned an error',
-          steps: isHtmlResponse ? [
-            '1. Go to your Apps Script project',
-            '2. Click Deploy → Manage deployments', 
-            '3. Click the gear icon to edit deployment settings',
-            '4. Set "Execute as" to "Me" (your account)',
-            '5. Set "Who has access" to "Anyone"',
-            '6. Click Deploy and test the new URL'
-          ] : [
-            '1. Check Apps Script logs for detailed error information',
-            '2. Verify the secret token matches between Supabase and Apps Script',
-            '3. Ensure your Apps Script doPost function handles secret properly',
-            '4. Check if the Google OAuth token format is correct',
-            '5. Verify the token has the required Gmail and Drive scopes'
-          ]
-        },
-        apps_script_url: appsScriptUrl,
-        error_details: responseText.substring(0, 200),
-        auth_method: 'body-based-v6',
-        v6_payload_structure: true
+        dev_mode: true
       }, 502);
     }
 
-    // Parse Apps Script response with enhanced error handling
+    // Parse Apps Script response
     let appsScriptData
     try {
       const responseText = await response.text();
@@ -429,25 +181,12 @@ serve(async (req) => {
       
       logNetworkEvent('SUCCESS', {
         status: appsScriptData.status,
-        message: appsScriptData.message,
-        dataKeys: Object.keys(appsScriptData.data || {}),
-        attachments: appsScriptData.data?.attachments || appsScriptData.data?.savedAttachments || 0,
-        emailsFound: appsScriptData.data?.emailsFound || 0,
-        emailsProcessed: appsScriptData.data?.processedEmails || 0,
-        debugInfo: appsScriptData.data?.debugInfo || {},
+        attachments: appsScriptData.data?.attachments || 0,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        performance_metrics: {
-          edge_function_duration: totalDuration,
-          apps_script_processing: appsScriptData.data?.processing_time || 'unknown'
-        }
+        dev_mode: true
       });
     } catch (error) {
-      logNetworkEvent('RESPONSE_PARSE_ERROR', { 
-        error: error.message, 
-        request_id: debugInfo.request_id,
-        total_duration: totalDuration
-      });
       return createCorsResponse({
         error: 'Apps Script returned invalid JSON',
         details: error.message,
@@ -456,20 +195,15 @@ serve(async (req) => {
       }, 502);
     }
 
-    // Return successful response with enhanced metadata and debugging info
+    // Return successful response
     return createCorsResponse({
       success: true,
-      message: 'Flow processed successfully',
-      timestamp: new Date().toISOString(),
+      message: 'Flow processed successfully (dev mode)',
       request_id: debugInfo.request_id,
-      auth_method: 'body-based-v6',
-      v6_payload_structure: true,
+      dev_mode: true,
       performance_metrics: {
-        total_duration: totalDuration,
-        timeout_used: 140000,
-        retries_available: RETRY_CONFIG.maxRetries
+        total_duration: totalDuration
       },
-      debug_info: debugInfo,
       apps_script_response: appsScriptData
     }, 200);
 
@@ -477,8 +211,6 @@ serve(async (req) => {
     const totalDuration = Date.now() - startTime;
     logNetworkEvent('EDGE_FUNCTION_ERROR', { 
       error: error.message,
-      name: error.constructor.name,
-      stack: error.stack?.substring(0, 500),
       request_id: debugInfo.request_id,
       total_duration: totalDuration
     });
@@ -486,10 +218,9 @@ serve(async (req) => {
     return createCorsResponse({
       error: 'Edge Function internal error',
       message: error.message,
-      timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
       total_duration: totalDuration,
-      retryable: (error as any).retryable !== false
+      dev_mode: true
     }, 500);
   }
 })
