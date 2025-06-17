@@ -20,27 +20,40 @@ serve(async (req) => {
   try {
     logNetworkEvent('FUNCTION_START', { request_id: debugInfo.request_id });
 
-    // Get environment variables
+    // Get environment variables with validation
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
     const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET')
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
+    // Enhanced environment validation
     if (!appsScriptUrl || !appsScriptSecret) {
+      logNetworkEvent('CONFIG_ERROR', {
+        hasUrl: !!appsScriptUrl,
+        hasSecret: !!appsScriptSecret,
+        request_id: debugInfo.request_id
+      });
       return createCorsResponse({
         error: 'Configuration error: Missing Apps Script configuration',
+        details: `Missing ${!appsScriptUrl ? 'APPS_SCRIPT_URL' : ''} ${!appsScriptSecret ? 'APPS_SCRIPT_SECRET' : ''}`.trim(),
         request_id: debugInfo.request_id
       }, 500);
     }
 
     if (!supabaseUrl || !supabaseServiceKey) {
+      logNetworkEvent('CONFIG_ERROR', {
+        hasSupabaseUrl: !!supabaseUrl,
+        hasSupabaseKey: !!supabaseServiceKey,
+        request_id: debugInfo.request_id
+      });
       return createCorsResponse({
         error: 'Configuration error: Missing Supabase configuration',
+        details: `Missing ${!supabaseUrl ? 'SUPABASE_URL' : ''} ${!supabaseServiceKey ? 'SUPABASE_SERVICE_ROLE_KEY' : ''}`.trim(),
         request_id: debugInfo.request_id
       }, 500);
     }
 
-    // Parse request body
+    // Parse and validate request body
     let originalPayload: RequestBody;
     try {
       const bodyText = await req.text();
@@ -57,10 +70,27 @@ serve(async (req) => {
       }
 
       originalPayload = JSON.parse(bodyText);
+      
+      // Enhanced payload validation
+      if (!originalPayload.action) {
+        return createCorsResponse({
+          error: 'Missing required field: action',
+          request_id: debugInfo.request_id
+        }, 400);
+      }
+
+      if (!originalPayload.user_id) {
+        return createCorsResponse({
+          error: 'Missing required field: user_id',
+          request_id: debugInfo.request_id
+        }, 400);
+      }
+
       logNetworkEvent('PAYLOAD_PARSED', {
         action: originalPayload.action,
         flowName: originalPayload.userConfig?.flowName,
         userId: originalPayload.user_id,
+        hasDriveFolder: !!originalPayload.userConfig?.driveFolder,
         request_id: debugInfo.request_id
       });
     } catch (error) {
@@ -84,6 +114,18 @@ serve(async (req) => {
         supabaseServiceKey,
         debugInfo.request_id
       );
+
+      if (!userEmail) {
+        logNetworkEvent('USER_EMAIL_NOT_FOUND', {
+          user_id: originalPayload.user_id,
+          request_id: debugInfo.request_id
+        });
+        return createCorsResponse({
+          error: 'User email not found in profiles table',
+          details: 'User must have a profile with email to execute flows',
+          request_id: debugInfo.request_id
+        }, 400);
+      }
     }
 
     // Create payload for Apps Script using shared secret authentication
@@ -94,7 +136,14 @@ serve(async (req) => {
       debugInfo.request_id
     );
 
-    // Call Apps Script
+    logNetworkEvent('CALLING_APPS_SCRIPT', {
+      userEmail: userEmail,
+      flowName: appsScriptPayload.userConfig.flowName,
+      driveFolder: appsScriptPayload.userConfig.driveFolder,
+      request_id: debugInfo.request_id
+    });
+
+    // Call Apps Script with enhanced error handling
     try {
       const appsScriptData = await callAppsScript(
         appsScriptUrl,
@@ -104,7 +153,14 @@ serve(async (req) => {
 
       const totalDuration = Date.now() - startTime;
 
-      // Return successful response
+      logNetworkEvent('SUCCESS', {
+        status: appsScriptData.status,
+        attachments: appsScriptData.data?.attachments || 0,
+        total_duration: totalDuration,
+        request_id: debugInfo.request_id
+      });
+
+      // Return successful response with enhanced debugging
       return createCorsResponse({
         success: true,
         message: `Flow processed successfully using shared secret authentication`,
@@ -114,15 +170,33 @@ serve(async (req) => {
         performance_metrics: {
           total_duration: totalDuration
         },
-        apps_script_response: appsScriptData
+        apps_script_response: appsScriptData,
+        debug_info: {
+          user_id: originalPayload.user_id,
+          user_email: userEmail,
+          flow_name: originalPayload.userConfig?.flowName,
+          drive_folder: originalPayload.userConfig?.driveFolder
+        }
       }, 200);
 
     } catch (appsScriptError) {
       const totalDuration = Date.now() - startTime;
-      return createCorsResponse({
+      logNetworkEvent('APPS_SCRIPT_ERROR', {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration
+      });
+      
+      return createCorsResponse({
+        error: 'Apps Script execution failed',
+        details: appsScriptError.message,
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration,
+        debug_info: {
+          user_id: originalPayload.user_id,
+          user_email: userEmail,
+          apps_script_url: appsScriptUrl
+        }
       }, 502);
     }
 
