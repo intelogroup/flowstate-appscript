@@ -39,7 +39,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
     if (!user) {
       const errorMsg = "Authentication required to execute flows";
       addLog(errorMsg, true);
-      return null;
+      throw new Error(errorMsg);
     }
 
     const context = createExecutionContext(flow);
@@ -49,7 +49,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
 
     try {
       const flowConfig = buildFlowConfig(flow);
-      addLog(`🔑 Using simplified authentication for ${flow.flow_name}`);
+      addLog(`🔑 Authenticating with Apps Script using shared secret for ${flow.flow_name}`);
 
       const result = await FlowService.executeFlow(flow.id, flowConfig);
 
@@ -64,14 +64,28 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         );
         return result;
       } else {
-        const errorMsg = result?.error || 'Unknown error';
+        const errorMsg = result?.error || 'Unknown error occurred during flow execution';
         addLog(`❌ Flow "${flow.flow_name}" failed: ${errorMsg}`, true);
-        return result;
+        
+        // Provide more specific error messages for common issues
+        if (errorMsg.includes('Authentication failed')) {
+          throw new Error('Apps Script authentication failed. Please check your configuration.');
+        } else if (errorMsg.includes('timeout')) {
+          throw new Error('Flow execution timed out. Please try again or check your Gmail settings.');
+        } else if (errorMsg.includes('Gmail API')) {
+          throw new Error('Gmail access error. Please reconnect your Google account.');
+        } else if (errorMsg.includes('Drive')) {
+          throw new Error('Google Drive access error. Please check folder permissions.');
+        }
+        
+        throw new Error(errorMsg);
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
       addLog(`❌ Error executing flow "${flow.flow_name}": ${errorMsg}`, true);
-      return { success: false, error: errorMsg };
+      
+      // Re-throw the error so it can be caught by the UI layer
+      throw error;
     } finally {
       setRunningFlows(prev => {
         const newSet = new Set(prev);

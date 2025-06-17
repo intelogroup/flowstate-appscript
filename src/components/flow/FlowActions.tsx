@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Clock } from 'lucide-react';
+import { Play, Clock, Loader2 } from 'lucide-react';
 
 interface FlowActionsProps {
   flowId: string;
@@ -30,7 +30,7 @@ const FlowActions = React.memo(({
     if (isRunning) {
       return (
         <>
-          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           Running...
         </>
       );
@@ -53,17 +53,26 @@ const FlowActions = React.memo(({
     );
   };
 
+  const getButtonVariant = () => {
+    if (isOnCooldown) return 'secondary';
+    if (isRunning) return 'default';
+    return 'default';
+  };
+
+  const getButtonClass = () => {
+    if (isOnCooldown) return 'bg-gray-400 hover:bg-gray-400 cursor-not-allowed text-white';
+    if (isRunning) return 'bg-blue-600 hover:bg-blue-600 cursor-not-allowed';
+    return 'bg-green-600 hover:bg-green-700';
+  };
+
   return (
     <div className="flex items-center space-x-2">
       <Button
         onClick={onRun}
         disabled={isDisabled}
         size="sm"
-        className={`${
-          isOnCooldown 
-            ? 'bg-gray-400 hover:bg-gray-400 cursor-not-allowed' 
-            : 'bg-green-600 hover:bg-green-700'
-        } disabled:opacity-50`}
+        variant={getButtonVariant()}
+        className={getButtonClass()}
       >
         {getButtonContent()}
       </Button>
@@ -72,6 +81,7 @@ const FlowActions = React.memo(({
         variant="outline"
         size="sm"
         className="text-red-600 hover:text-red-700"
+        disabled={isRunning}
       >
         Delete
       </Button>
