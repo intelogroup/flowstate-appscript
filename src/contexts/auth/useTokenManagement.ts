@@ -2,7 +2,6 @@
 import { useCallback } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { AuthTokenService } from '@/services/authTokenService';
 
 interface UseTokenManagementProps {
   setSession: (session: Session | null) => void;
@@ -17,7 +16,7 @@ export const useTokenManagement = ({
 }: UseTokenManagementProps) => {
   const refreshTokens = useCallback(async (): Promise<Session | null> => {
     try {
-      console.log('[TOKEN_MANAGEMENT] Refreshing session...');
+      console.log('[TOKEN_MANAGEMENT] Starting token refresh...');
       
       const { data, error } = await supabase.auth.refreshSession();
       
@@ -32,16 +31,23 @@ export const useTokenManagement = ({
       }
 
       if (!data.session) {
+        console.warn('[TOKEN_MANAGEMENT] Token refresh succeeded but no session returned');
         setAuthError('Token refresh failed - no session returned');
         return null;
       }
 
-      // Save refreshed tokens
-      try {
-        await AuthTokenService.saveTokens(data.session);
-      } catch (saveError) {
-        console.error('[TOKEN_MANAGEMENT] Failed to save refreshed tokens:', saveError);
-      }
+      console.log('[TOKEN_MANAGEMENT] Token refresh successful');
+      
+      // Save refreshed tokens in background (don't block the main flow)
+      setTimeout(async () => {
+        try {
+          const { AuthTokenService } = await import('@/services/authTokenService');
+          await AuthTokenService.saveTokens(data.session);
+          console.log('[TOKEN_MANAGEMENT] Background: Refreshed tokens saved');
+        } catch (saveError) {
+          console.error('[TOKEN_MANAGEMENT] Background: Failed to save refreshed tokens:', saveError);
+        }
+      }, 0);
       
       setSession(data.session);
       setUser(data.session.user);
@@ -56,7 +62,13 @@ export const useTokenManagement = ({
 
   const getValidToken = useCallback(async (): Promise<string | null> => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('[TOKEN_MANAGEMENT] Getting valid token...');
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        console.error('[TOKEN_MANAGEMENT] Error getting session for token:', error);
+        return null;
+      }
       
       if (!session) {
         console.log('[TOKEN_MANAGEMENT] No session found');
@@ -74,6 +86,7 @@ export const useTokenManagement = ({
         return refreshedSession?.provider_token || refreshedSession?.access_token || null;
       }
 
+      console.log('[TOKEN_MANAGEMENT] Session valid, returning token');
       return session.provider_token || session.access_token || null;
     } catch (error) {
       console.error('[TOKEN_MANAGEMENT] Error getting valid token:', error);

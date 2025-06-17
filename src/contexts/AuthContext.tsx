@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useMemo } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { AuthContextType } from './auth/types';
 import { useTokenValidation } from './auth/useTokenValidation';
@@ -23,6 +23,18 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Failsafe: ensure loading never stays true indefinitely
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.warn('[AUTH_CONTEXT] Loading timeout reached, forcing loading to false');
+        setLoading(false);
+      }
+    }, 10000); // 10 second timeout
+
+    return () => clearTimeout(timeout);
+  }, [loading]);
 
   // Modular hooks for better separation of concerns
   const { refreshTokens, getValidToken } = useTokenManagement({
