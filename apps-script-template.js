@@ -1,6 +1,7 @@
+
 /**
  * Apps Script Web App Template for Gmail to Drive Flow
- * SIMPLIFIED DEV MODE VERSION
+ * SIMPLE SHARED SECRET AUTHENTICATION VERSION
  */
 
 function doPost(e) {
@@ -15,40 +16,35 @@ function doPost(e) {
     }
     
     const requestData = JSON.parse(e.postData.contents);
-    const receivedSecret = requestData.secret;
-    const payload = requestData.payload;
+    const receivedSecret = requestData.auth_token;
+    const userEmail = requestData.userEmail;
+    const userConfig = requestData.userConfig;
     
     console.log('📋 Request parsed:', {
       hasSecret: !!receivedSecret,
-      hasPayload: !!payload,
-      action: payload?.action,
-      devMode: payload?.userConfig?.devMode
+      hasUserEmail: !!userEmail,
+      action: requestData.action,
+      flowName: userConfig?.flowName
     });
     
-    // DEV MODE: Skip authentication if devMode is enabled
-    if (payload?.userConfig?.devMode || payload?.debug_info?.dev_mode) {
-      console.log('🚧 DEV MODE: Skipping authentication checks');
-      return processGmailFlowDevMode(payload.userConfig);
-    }
-    
-    // PRODUCTION MODE: Check authentication
+    // Check authentication using shared secret
     if (!SCRIPT_SECRET) {
-      console.error('❌ APPS_SCRIPT_SECRET not configured');
-      return createErrorResponse('Server configuration error');
+      console.error('❌ APPS_SCRIPT_SECRET not configured in Apps Script properties');
+      return createErrorResponse('Server configuration error: Missing secret');
     }
     
     if (receivedSecret !== SCRIPT_SECRET) {
       console.error('❌ Authentication failed: Invalid secret');
-      return createErrorResponse('Unauthorized: Invalid authentication secret');
+      return createErrorResponse('Authentication failed: Invalid secret token');
     }
     
-    console.log('✅ Authentication successful');
+    console.log('✅ Authentication successful with shared secret');
     
-    // Route to appropriate handler
-    if (payload.action === 'process_gmail_flow') {
-      return processGmailFlow(payload.userConfig, payload.googleTokens);
+    // Process the Gmail flow with user's email
+    if (requestData.action === 'process_gmail_flow') {
+      return processGmailFlowWithUserEmail(userConfig, userEmail);
     } else {
-      return createErrorResponse('Unknown action: ' + payload.action);
+      return createErrorResponse('Unknown action: ' + requestData.action);
     }
     
   } catch (error) {
@@ -57,32 +53,17 @@ function doPost(e) {
   }
 }
 
-function processGmailFlowDevMode(userConfig) {
+function processGmailFlowWithUserEmail(userConfig, userEmail) {
   try {
-    console.log('🚧 Processing Gmail flow in DEV MODE');
+    console.log('📧 Processing Gmail flow with user email:', userEmail);
     console.log('📧 User config:', {
       senders: userConfig?.senders,
       driveFolder: userConfig?.driveFolder,
       flowName: userConfig?.flowName
     });
     
-    // Build Gmail search query
-    let searchQuery = '';
-    if (userConfig.senders && userConfig.senders.trim()) {
-      const senders = userConfig.senders.split(',').map(s => s.trim()).filter(s => s);
-      if (senders.length === 1) {
-        searchQuery = `from:${senders[0]}`;
-      } else if (senders.length > 1) {
-        searchQuery = `(${senders.map(s => `from:${s}`).join(' OR ')})`;
-      }
-    }
-    
-    // Add attachment filter and recent emails
-    if (searchQuery) {
-      searchQuery += ' has:attachment newer_than:7d';
-    } else {
-      searchQuery = 'has:attachment newer_than:7d';
-    }
+    // Build Gmail search query using the user's email and configuration
+    let searchQuery = buildSearchQuery(userConfig, userEmail);
     
     console.log('🔍 Gmail search query:', searchQuery);
     
@@ -123,115 +104,18 @@ function processGmailFlowDevMode(userConfig) {
     
     const result = {
       status: 'success',
-      message: `DEV MODE: Processed ${processedCount} emails and saved ${attachmentCount} attachments`,
+      message: `Processed ${processedCount} emails and saved ${attachmentCount} attachments for ${userEmail}`,
       data: {
         processedEmails: processedCount,
         savedAttachments: attachmentCount,
         emailsFound: emailsFound,
         attachments: attachmentCount,
         flowName: userConfig.flowName,
-        authMethod: 'dev-mode',
+        userEmail: userEmail,
+        authMethod: 'shared-secret',
         searchQuery: searchQuery,
         debugInfo: {
-          devMode: true,
-          searchQuery: searchQuery,
-          emailsFound: emailsFound,
-          processedEmails: processedCount,
-          savedAttachments: attachmentCount
-        }
-      }
-    };
-    
-    console.log('✅ DEV MODE Gmail flow completed:', result);
-    
-    return ContentService
-      .createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (error) {
-    console.error('❌ Error in DEV MODE Gmail flow:', error);
-    return createErrorResponse('DEV MODE: Failed to process Gmail flow: ' + error.toString());
-  }
-}
-
-function processGmailFlow(userConfig, googleTokens) {
-  try {
-    console.log('📧 Processing Gmail flow for:', userConfig?.flowName);
-    
-    const accessToken = googleTokens?.access_token;
-    
-    if (!accessToken) {
-      console.error('❌ No access token provided');
-      return createErrorResponse('Google OAuth access token required');
-    }
-    
-    console.log('🔑 Using Google access token:', accessToken.substring(0, 20) + '...');
-    
-    // Build Gmail search query
-    let searchQuery = '';
-    if (userConfig.senders && userConfig.senders.trim()) {
-      const senders = userConfig.senders.split(',').map(s => s.trim()).filter(s => s);
-      if (senders.length === 1) {
-        searchQuery = `from:${senders[0]}`;
-      } else if (senders.length > 1) {
-        searchQuery = `(${senders.map(s => `from:${s}`).join(' OR ')})`;
-      }
-    }
-    
-    if (searchQuery) {
-      searchQuery += ' has:attachment';
-    } else {
-      searchQuery = 'has:attachment';
-    }
-    
-    console.log('🔍 Gmail search query:', searchQuery);
-    
-    const threads = GmailApp.search(searchQuery, 0, userConfig.maxEmails || 50);
-    let processedCount = 0;
-    let attachmentCount = 0;
-    let emailsFound = threads.length;
-    
-    console.log(`📨 Found ${emailsFound} email threads`);
-    
-    threads.forEach(thread => {
-      const messages = thread.getMessages();
-      
-      messages.forEach(message => {
-        const attachments = message.getAttachments();
-        
-        attachments.forEach(attachment => {
-          if (shouldProcessFileType(attachment, userConfig.fileTypes)) {
-            try {
-              const fileName = `${userConfig.flowName}_${new Date().toISOString()}_${attachment.getName()}`;
-              const folder = getOrCreateFolder(userConfig.driveFolder);
-              
-              const file = folder.createFile(attachment.copyBlob().setName(fileName));
-              
-              console.log(`💾 Saved attachment: ${fileName}`);
-              attachmentCount++;
-              
-            } catch (attachmentError) {
-              console.error('❌ Error processing attachment:', attachmentError);
-            }
-          }
-        });
-        
-        processedCount++;
-      });
-    });
-    
-    const result = {
-      status: 'success',
-      message: `Processed ${processedCount} emails and saved ${attachmentCount} attachments`,
-      data: {
-        processedEmails: processedCount,
-        savedAttachments: attachmentCount,
-        emailsFound: emailsFound,
-        attachments: attachmentCount,
-        flowName: userConfig.flowName,
-        authMethod: 'oauth',
-        searchQuery: searchQuery,
-        debugInfo: {
+          userEmail: userEmail,
           searchQuery: searchQuery,
           emailsFound: emailsFound,
           processedEmails: processedCount,
@@ -250,6 +134,33 @@ function processGmailFlow(userConfig, googleTokens) {
     console.error('❌ Error processing Gmail flow:', error);
     return createErrorResponse('Failed to process Gmail flow: ' + error.toString());
   }
+}
+
+function buildSearchQuery(userConfig, userEmail) {
+  let searchQuery = '';
+  
+  // Start with the senders configuration
+  if (userConfig.senders && userConfig.senders.trim()) {
+    const senders = userConfig.senders.split(',').map(s => s.trim()).filter(s => s);
+    if (senders.length === 1) {
+      searchQuery = `from:${senders[0]}`;
+    } else if (senders.length > 1) {
+      searchQuery = `(${senders.map(s => `from:${s}`).join(' OR ')})`;
+    }
+  } else if (userEmail) {
+    // If no specific senders configured, use the user's own email
+    console.log('🔧 No senders specified, using user email for filtering');
+    searchQuery = `from:${userEmail}`;
+  }
+  
+  // Add attachment filter and recent emails
+  if (searchQuery) {
+    searchQuery += ' has:attachment newer_than:7d';
+  } else {
+    searchQuery = 'has:attachment newer_than:7d';
+  }
+  
+  return searchQuery;
 }
 
 function shouldProcessFileType(attachment, allowedTypes) {
@@ -307,6 +218,6 @@ function createErrorResponse(message) {
 
 // Test function
 function testFunction() {
-  console.log('✅ Apps Script is working correctly in DEV MODE!');
+  console.log('✅ Apps Script is working correctly with shared secret authentication!');
   return 'Success';
 }

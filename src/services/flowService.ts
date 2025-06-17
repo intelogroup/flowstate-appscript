@@ -1,15 +1,14 @@
 import { supabase } from '@/integrations/supabase/client';
 
 export interface FlowConfig {
-  senders?: string; // NEW: V.06 compatible field
-  emailFilter?: string; // Legacy field for backward compatibility
+  senders?: string;
+  emailFilter?: string;
   driveFolder: string;
   fileTypes: string[];
   userId: string;
   flowName: string;
   maxEmails?: number;
   enableDebugMode?: boolean;
-  showEmailDetails?: boolean;
 }
 
 export interface FlowExecutionResult {
@@ -18,20 +17,12 @@ export interface FlowExecutionResult {
     attachments: number;
     processedEmails: number;
     emailsFound: number;
-    processed?: number;
     performance_metrics?: {
       total_duration: number;
-      timeout_used: number;
     };
     debugInfo?: any;
   };
   error?: string;
-}
-
-export interface GoogleTokens {
-  access_token: string;
-  refresh_token: string;
-  provider_token: string;
 }
 
 export interface CreateFlowData {
@@ -49,64 +40,41 @@ export class FlowService {
 
   static async executeFlow(
     flowId: string,
-    userConfig: FlowConfig,
-    googleTokens?: GoogleTokens
+    userConfig: FlowConfig
   ): Promise<FlowExecutionResult> {
     try {
-      console.log('[FLOW SERVICE] Executing flow with enhanced token management');
+      console.log('[FLOW SERVICE] Executing flow with simplified authentication');
       console.log('[FLOW SERVICE] Flow config:', {
         flowId,
         userId: userConfig.userId,
-        flowName: userConfig.flowName,
-        hasGoogleTokens: !!googleTokens
+        flowName: userConfig.flowName
       });
       
       const payload = {
         action: 'process_gmail_flow',
-        userConfig,
-        user_id: userConfig.userId, // Pass user_id for token retrieval
-        // Include tokens if available, but Apps Script proxy will try to get saved tokens if these are missing
-        auth_token: googleTokens?.provider_token || googleTokens?.access_token,
-        access_token: googleTokens?.access_token,
-        googleTokens: googleTokens ? {
-          access_token: googleTokens.access_token,
-          refresh_token: googleTokens.refresh_token || '',
-          provider_token: googleTokens.provider_token || ''
-        } : undefined,
+        user_id: userConfig.userId, // Pass user_id so edge function can get user email
+        userConfig: {
+          senders: userConfig.senders || userConfig.emailFilter,
+          driveFolder: userConfig.driveFolder,
+          fileTypes: userConfig.fileTypes,
+          flowName: userConfig.flowName,
+          maxEmails: userConfig.maxEmails || 10,
+          enableDebugMode: true
+        },
         debug_info: {
           request_id: `flow-${flowId}-${Date.now()}`,
-          supabase_timestamp: new Date().toISOString(),
-          auth_method: 'enhanced-token-management',
-          timeout_config: 90000,
-          request_source: 'flow-service-v2',
-          has_session_tokens: !!googleTokens,
-          user_id: userConfig.userId
+          auth_method: 'shared-secret',
+          request_source: 'flow-service-simplified'
         }
       };
 
-      console.log('[FLOW SERVICE] Final payload being sent:', {
-        action: payload.action,
-        userId: payload.user_id,
-        hasUserConfig: !!payload.userConfig,
-        hasGoogleTokens: !!payload.googleTokens,
-        hasAccessToken: !!payload.access_token,
-        hasAuthToken: !!payload.auth_token,
-        payloadSize: JSON.stringify(payload).length
-      });
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      // Add Authorization header if we have tokens
-      const primaryToken = googleTokens?.provider_token || googleTokens?.access_token;
-      if (primaryToken) {
-        headers['Authorization'] = `Bearer ${primaryToken}`;
-      }
+      console.log('[FLOW SERVICE] Sending payload with shared secret auth');
 
       const response = await fetch(this.EDGE_FUNCTION_URL, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
 
@@ -134,7 +102,6 @@ export class FlowService {
           error: appsScriptData.message || 'Apps Script execution failed'
         };
       } else {
-        // Handle edge function success but unknown Apps Script status
         return {
           success: false,
           data: undefined,

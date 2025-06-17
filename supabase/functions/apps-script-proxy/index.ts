@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
-import { extractDebugInfo, logNetworkEvent, generateRequestId, createRetryableError } from "../_shared/network-utils.ts"
+import { extractDebugInfo, logNetworkEvent, generateRequestId } from "../_shared/network-utils.ts"
 
 interface FlowConfig {
   senders?: string
@@ -13,17 +13,12 @@ interface FlowConfig {
   flowName?: string
   maxEmails?: number
   enableDebugMode?: boolean
-  showEmailDetails?: boolean
 }
 
 interface RequestBody {
   action: string
   flowId?: string
-  access_token?: string
-  auth_token?: string
   userConfig?: FlowConfig
-  googleTokens?: any
-  debug_info?: any
   user_id?: string
 }
 
@@ -98,48 +93,36 @@ serve(async (req) => {
       }, 400);
     }
 
-    // Try to get saved tokens from database if user_id is provided
-    let authToken = originalPayload.auth_token || originalPayload.access_token;
-    
-    if (originalPayload.user_id && !authToken) {
+    // Get user email from Supabase profiles table
+    let userEmail = null;
+    if (originalPayload.user_id) {
       try {
-        logNetworkEvent('FETCHING_SAVED_TOKENS', {
+        logNetworkEvent('FETCHING_USER_EMAIL', {
           user_id: originalPayload.user_id,
           request_id: debugInfo.request_id
         });
 
-        const { data: savedTokens, error: tokenError } = await supabase
-          .from('user_auth_tokens')
-          .select('*')
-          .eq('user_id', originalPayload.user_id)
-          .eq('provider', 'google')
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('id', originalPayload.user_id)
           .single();
 
-        if (tokenError) {
-          logNetworkEvent('TOKEN_FETCH_ERROR', {
-            error: tokenError.message,
+        if (profileError) {
+          logNetworkEvent('USER_EMAIL_FETCH_ERROR', {
+            error: profileError.message,
             user_id: originalPayload.user_id,
             request_id: debugInfo.request_id
           });
-        } else if (savedTokens) {
-          // Use provider_token first, then access_token as fallback
-          authToken = savedTokens.provider_token || savedTokens.access_token;
-          
-          logNetworkEvent('SAVED_TOKENS_RETRIEVED', {
-            user_id: originalPayload.user_id,
-            hasProviderToken: !!savedTokens.provider_token,
-            hasAccessToken: !!savedTokens.access_token,
-            tokenType: savedTokens.provider_token ? 'provider_token' : 'access_token',
-            request_id: debugInfo.request_id
-          });
-        } else {
-          logNetworkEvent('NO_SAVED_TOKENS_FOUND', {
+        } else if (profile?.email) {
+          userEmail = profile.email;
+          logNetworkEvent('USER_EMAIL_RETRIEVED', {
             user_id: originalPayload.user_id,
             request_id: debugInfo.request_id
           });
         }
       } catch (error) {
-        logNetworkEvent('TOKEN_RETRIEVAL_ERROR', {
+        logNetworkEvent('USER_EMAIL_RETRIEVAL_ERROR', {
           error: error.message,
           user_id: originalPayload.user_id,
           request_id: debugInfo.request_id
@@ -147,43 +130,33 @@ serve(async (req) => {
       }
     }
 
-    // Create payload for Apps Script
+    // Create payload for Apps Script using shared secret authentication
     const bodyForGas = {
-      secret: appsScriptSecret,
-      payload: {
-        action: 'process_gmail_flow',
-        userConfig: {
-          senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter || 'jayveedz19@gmail.com',
-          driveFolder: originalPayload.userConfig?.driveFolder || 'Email Attachments',
-          fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
-          flowName: originalPayload.userConfig?.flowName || 'Default Flow',
-          maxEmails: 10,
-          enableDebugMode: true,
-          devMode: !authToken // Signal dev mode if no auth token
-        },
-        auth_token: authToken,
-        access_token: authToken,
-        googleTokens: authToken ? {
-          access_token: authToken,
-          provider_token: authToken
-        } : undefined,
-        debug_info: {
-          request_id: debugInfo.request_id,
-          has_auth_token: !!authToken,
-          token_source: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
-          dev_mode: !authToken,
-          timestamp: new Date().toISOString()
-        }
+      auth_token: appsScriptSecret, // Simple shared secret authentication
+      action: 'process_gmail_flow',
+      userEmail: userEmail, // Pass user's email for personalized processing
+      userConfig: {
+        senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter,
+        driveFolder: originalPayload.userConfig?.driveFolder || 'Email Attachments',
+        fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
+        flowName: originalPayload.userConfig?.flowName || 'Default Flow',
+        maxEmails: 10,
+        enableDebugMode: true
+      },
+      debug_info: {
+        request_id: debugInfo.request_id,
+        has_user_email: !!userEmail,
+        auth_method: 'shared-secret',
+        timestamp: new Date().toISOString()
       }
     };
 
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
-      senders: bodyForGas.payload.userConfig.senders,
-      driveFolder: bodyForGas.payload.userConfig.driveFolder,
-      hasAuthToken: !!authToken,
-      tokenSource: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
-      devMode: !authToken,
+      userEmail: userEmail,
+      senders: bodyForGas.userConfig.senders,
+      driveFolder: bodyForGas.userConfig.driveFolder,
+      authMethod: 'shared-secret',
       request_id: debugInfo.request_id
     });
 
@@ -193,21 +166,12 @@ serve(async (req) => {
 
     let response;
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-Request-ID': debugInfo.request_id
-      };
-
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-        headers['X-Auth-Source'] = originalPayload.user_id ? 'saved-tokens' : 'request-payload';
-      } else {
-        headers['X-Dev-Mode'] = 'true';
-      }
-
       response = await fetch(appsScriptUrl, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-ID': debugInfo.request_id
+        },
         body: JSON.stringify(bodyForGas),
         signal: controller.signal
       });
@@ -241,8 +205,7 @@ serve(async (req) => {
       return createCorsResponse({
         error: `Apps Script error (${response.status})`,
         request_id: debugInfo.request_id,
-        total_duration: totalDuration,
-        has_auth_token: !!authToken
+        total_duration: totalDuration
       }, 502);
     }
 
@@ -256,8 +219,7 @@ serve(async (req) => {
         status: appsScriptData.status,
         attachments: appsScriptData.data?.attachments || 0,
         request_id: debugInfo.request_id,
-        total_duration: totalDuration,
-        has_auth_token: !!authToken
+        total_duration: totalDuration
       });
     } catch (error) {
       return createCorsResponse({
@@ -271,10 +233,10 @@ serve(async (req) => {
     // Return successful response
     return createCorsResponse({
       success: true,
-      message: `Flow processed successfully ${authToken ? 'with auth tokens' : '(dev mode)'}`,
+      message: `Flow processed successfully using shared secret authentication`,
       request_id: debugInfo.request_id,
-      has_auth_token: !!authToken,
-      token_source: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
+      auth_method: 'shared-secret',
+      user_email: userEmail,
       performance_metrics: {
         total_duration: totalDuration
       },
