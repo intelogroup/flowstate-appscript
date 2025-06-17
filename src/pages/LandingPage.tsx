@@ -8,8 +8,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
 const LandingPage = () => {
-  const { user } = useAuth();
   const navigate = useNavigate();
+  
+  // Safely access auth context with error handling
+  let user = null;
+  try {
+    const auth = useAuth();
+    user = auth.user;
+  } catch (error) {
+    console.log('[LANDING] AuthContext not available yet:', error);
+    // Context not ready yet, user will remain null
+  }
 
   // Redirect authenticated users to the app
   useEffect(() => {
