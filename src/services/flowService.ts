@@ -50,69 +50,63 @@ export class FlowService {
   static async executeFlow(
     flowId: string,
     userConfig: FlowConfig,
-    googleTokens: GoogleTokens
+    googleTokens?: GoogleTokens
   ): Promise<FlowExecutionResult> {
     try {
-      console.log('[FLOW SERVICE] Executing flow with V.06 payload structure');
-      console.log('[FLOW SERVICE] Google tokens debug:', {
-        hasAccessToken: !!googleTokens.access_token,
-        hasRefreshToken: !!googleTokens.refresh_token,
-        hasProviderToken: !!googleTokens.provider_token,
-        accessTokenLength: googleTokens.access_token?.length || 0,
-        providerTokenLength: googleTokens.provider_token?.length || 0
-      });
-      
-      // Use provider_token as the primary OAuth token for Apps Script
-      const primaryToken = googleTokens.provider_token || googleTokens.access_token;
-      
-      console.log('[FLOW SERVICE] Using primary token:', {
-        tokenType: googleTokens.provider_token ? 'provider_token' : 'access_token',
-        tokenLength: primaryToken?.length || 0,
-        tokenPreview: primaryToken?.substring(0, 30) + '...'
+      console.log('[FLOW SERVICE] Executing flow with enhanced token management');
+      console.log('[FLOW SERVICE] Flow config:', {
+        flowId,
+        userId: userConfig.userId,
+        flowName: userConfig.flowName,
+        hasGoogleTokens: !!googleTokens
       });
       
       const payload = {
         action: 'process_gmail_flow',
         userConfig,
-        // Apps Script expects the token as 'auth_token' in the payload
-        auth_token: primaryToken,
-        access_token: primaryToken, // Also include as access_token for compatibility
-        googleTokens: {
-          access_token: primaryToken,
+        user_id: userConfig.userId, // Pass user_id for token retrieval
+        // Include tokens if available, but Apps Script proxy will try to get saved tokens if these are missing
+        auth_token: googleTokens?.provider_token || googleTokens?.access_token,
+        access_token: googleTokens?.access_token,
+        googleTokens: googleTokens ? {
+          access_token: googleTokens.access_token,
           refresh_token: googleTokens.refresh_token || '',
           provider_token: googleTokens.provider_token || ''
-        },
+        } : undefined,
         debug_info: {
           request_id: `flow-${flowId}-${Date.now()}`,
           supabase_timestamp: new Date().toISOString(),
-          auth_method: 'body-based-v6',
+          auth_method: 'enhanced-token-management',
           timeout_config: 90000,
-          request_source: 'edge-function-enhanced-debug',
-          token_debug: {
-            primary_token_present: !!primaryToken,
-            primary_token_type: googleTokens.provider_token ? 'provider_token' : 'access_token',
-            primary_token_length: primaryToken?.length || 0
-          }
+          request_source: 'flow-service-v2',
+          has_session_tokens: !!googleTokens,
+          user_id: userConfig.userId
         }
       };
 
       console.log('[FLOW SERVICE] Final payload being sent:', {
         action: payload.action,
+        userId: payload.user_id,
         hasUserConfig: !!payload.userConfig,
         hasGoogleTokens: !!payload.googleTokens,
         hasAccessToken: !!payload.access_token,
         hasAuthToken: !!payload.auth_token,
-        primaryTokenPresent: !!primaryToken,
-        primaryTokenLength: primaryToken?.length || 0,
         payloadSize: JSON.stringify(payload).length
       });
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Authorization header if we have tokens
+      const primaryToken = googleTokens?.provider_token || googleTokens?.access_token;
+      if (primaryToken) {
+        headers['Authorization'] = `Bearer ${primaryToken}`;
+      }
+
       const response = await fetch(this.EDGE_FUNCTION_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${primaryToken}` // Use the OAuth token in Authorization header
-        },
+        headers,
         body: JSON.stringify(payload)
       });
 

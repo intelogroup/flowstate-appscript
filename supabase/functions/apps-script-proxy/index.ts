@@ -1,5 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
 import { extractDebugInfo, logNetworkEvent, generateRequestId, createRetryableError } from "../_shared/network-utils.ts"
 
@@ -23,6 +24,7 @@ interface RequestBody {
   userConfig?: FlowConfig
   googleTokens?: any
   debug_info?: any
+  user_id?: string
 }
 
 serve(async (req) => {
@@ -30,7 +32,6 @@ serve(async (req) => {
   const startTime = Date.now();
   logNetworkEvent('REQUEST_RECEIVED', debugInfo);
 
-  // Enhanced CORS preflight handling
   if (req.method === 'OPTIONS') {
     logNetworkEvent('CORS_PREFLIGHT', { request_id: debugInfo.request_id });
     return handleCorsPrelight();
@@ -42,20 +43,25 @@ serve(async (req) => {
     // Get environment variables
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
     const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET')
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-    if (!appsScriptUrl) {
+    if (!appsScriptUrl || !appsScriptSecret) {
       return createCorsResponse({
-        error: 'Configuration error: APPS_SCRIPT_URL not set',
+        error: 'Configuration error: Missing Apps Script configuration',
         request_id: debugInfo.request_id
       }, 500);
     }
 
-    if (!appsScriptSecret) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       return createCorsResponse({
-        error: 'Configuration error: APPS_SCRIPT_SECRET not set',
+        error: 'Configuration error: Missing Supabase configuration',
         request_id: debugInfo.request_id
       }, 500);
     }
+
+    // Initialize Supabase client
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Parse request body
     let originalPayload: RequestBody;
@@ -77,6 +83,7 @@ serve(async (req) => {
       logNetworkEvent('PAYLOAD_PARSED', {
         action: originalPayload.action,
         flowName: originalPayload.userConfig?.flowName,
+        userId: originalPayload.user_id,
         request_id: debugInfo.request_id
       });
     } catch (error) {
@@ -91,50 +98,116 @@ serve(async (req) => {
       }, 400);
     }
 
-    // SIMPLIFIED DEV MODE: Create minimal payload structure
+    // Try to get saved tokens from database if user_id is provided
+    let authToken = originalPayload.auth_token || originalPayload.access_token;
+    
+    if (originalPayload.user_id && !authToken) {
+      try {
+        logNetworkEvent('FETCHING_SAVED_TOKENS', {
+          user_id: originalPayload.user_id,
+          request_id: debugInfo.request_id
+        });
+
+        const { data: savedTokens, error: tokenError } = await supabase
+          .from('user_auth_tokens')
+          .select('*')
+          .eq('user_id', originalPayload.user_id)
+          .eq('provider', 'google')
+          .single();
+
+        if (tokenError) {
+          logNetworkEvent('TOKEN_FETCH_ERROR', {
+            error: tokenError.message,
+            user_id: originalPayload.user_id,
+            request_id: debugInfo.request_id
+          });
+        } else if (savedTokens) {
+          // Use provider_token first, then access_token as fallback
+          authToken = savedTokens.provider_token || savedTokens.access_token;
+          
+          logNetworkEvent('SAVED_TOKENS_RETRIEVED', {
+            user_id: originalPayload.user_id,
+            hasProviderToken: !!savedTokens.provider_token,
+            hasAccessToken: !!savedTokens.access_token,
+            tokenType: savedTokens.provider_token ? 'provider_token' : 'access_token',
+            request_id: debugInfo.request_id
+          });
+        } else {
+          logNetworkEvent('NO_SAVED_TOKENS_FOUND', {
+            user_id: originalPayload.user_id,
+            request_id: debugInfo.request_id
+          });
+        }
+      } catch (error) {
+        logNetworkEvent('TOKEN_RETRIEVAL_ERROR', {
+          error: error.message,
+          user_id: originalPayload.user_id,
+          request_id: debugInfo.request_id
+        });
+      }
+    }
+
+    // Create payload for Apps Script
     const bodyForGas = {
       secret: appsScriptSecret,
       payload: {
         action: 'process_gmail_flow',
         userConfig: {
-          senders: originalPayload.userConfig?.senders || 'jayveedz19@gmail.com',
+          senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter || 'jayveedz19@gmail.com',
           driveFolder: originalPayload.userConfig?.driveFolder || 'Email Attachments',
           fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
           flowName: originalPayload.userConfig?.flowName || 'Default Flow',
           maxEmails: 10,
           enableDebugMode: true,
-          devMode: true // Signal to Apps Script that this is dev mode
+          devMode: !authToken // Signal dev mode if no auth token
         },
-        // SIMPLIFIED: Don't pass any auth tokens - let Apps Script handle dev mode
+        auth_token: authToken,
+        access_token: authToken,
+        googleTokens: authToken ? {
+          access_token: authToken,
+          provider_token: authToken
+        } : undefined,
         debug_info: {
           request_id: debugInfo.request_id,
-          dev_mode: true,
+          has_auth_token: !!authToken,
+          token_source: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
+          dev_mode: !authToken,
           timestamp: new Date().toISOString()
         }
       }
     };
 
-    logNetworkEvent('CALLING_APPS_SCRIPT_DEV_MODE', {
+    logNetworkEvent('CALLING_APPS_SCRIPT', {
       url: appsScriptUrl,
       senders: bodyForGas.payload.userConfig.senders,
       driveFolder: bodyForGas.payload.userConfig.driveFolder,
-      request_id: debugInfo.request_id,
-      devMode: true
+      hasAuthToken: !!authToken,
+      tokenSource: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
+      devMode: !authToken,
+      request_id: debugInfo.request_id
     });
 
-    // Make simplified request to Apps Script
+    // Make request to Apps Script
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     let response;
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Request-ID': debugInfo.request_id
+      };
+
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+        headers['X-Auth-Source'] = originalPayload.user_id ? 'saved-tokens' : 'request-payload';
+      } else {
+        headers['X-Dev-Mode'] = 'true';
+      }
+
       response = await fetch(appsScriptUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Request-ID': debugInfo.request_id,
-          'X-Dev-Mode': 'true'
-        },
+        headers,
         body: JSON.stringify(bodyForGas),
         signal: controller.signal
       });
@@ -169,7 +242,7 @@ serve(async (req) => {
         error: `Apps Script error (${response.status})`,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        dev_mode: true
+        has_auth_token: !!authToken
       }, 502);
     }
 
@@ -184,7 +257,7 @@ serve(async (req) => {
         attachments: appsScriptData.data?.attachments || 0,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        dev_mode: true
+        has_auth_token: !!authToken
       });
     } catch (error) {
       return createCorsResponse({
@@ -198,9 +271,10 @@ serve(async (req) => {
     // Return successful response
     return createCorsResponse({
       success: true,
-      message: 'Flow processed successfully (dev mode)',
+      message: `Flow processed successfully ${authToken ? 'with auth tokens' : '(dev mode)'}`,
       request_id: debugInfo.request_id,
-      dev_mode: true,
+      has_auth_token: !!authToken,
+      token_source: originalPayload.user_id ? 'saved_tokens' : 'request_payload',
       performance_metrics: {
         total_duration: totalDuration
       },
@@ -219,8 +293,7 @@ serve(async (req) => {
       error: 'Edge Function internal error',
       message: error.message,
       request_id: debugInfo.request_id,
-      total_duration: totalDuration,
-      dev_mode: true
+      total_duration: totalDuration
     }, 500);
   }
 })
