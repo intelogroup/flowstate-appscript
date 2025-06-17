@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -131,8 +132,8 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
             setAuthError('Google authentication incomplete. Please sign in again.');
           } else if (timeUntilExpiry <= 300) { // 5 minutes buffer
             console.log('[AUTH] Google tokens expire soon, attempting proactive refresh...');
-            const refreshSuccess = await forceTokenRefresh();
-            if (!refreshSuccess) {
+            const refreshedSession = await forceTokenRefresh();
+            if (!refreshedSession) {
               setAuthError('Google tokens expired and refresh failed. Please sign in again.');
             }
           } else {
@@ -170,7 +171,7 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     signInWithGoogle,
     isTokenValid,
     forceTokenRefresh,
-    getGoogleOAuthToken: getValidGoogleToken, // Use the enhanced version
+    getGoogleOAuthToken: getValidGoogleToken, // Use the enhanced async version
   }), [
     user, 
     session, 

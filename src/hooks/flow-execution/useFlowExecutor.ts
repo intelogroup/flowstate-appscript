@@ -28,7 +28,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
     }
 
     // Enhanced token validation with proactive refresh
-    let validToken = getGoogleOAuthToken();
+    let validToken = await getGoogleOAuthToken();
     if (!validToken || !isTokenValid()) {
       addLog("🔄 Token missing or expired, attempting refresh before execution...", false);
       
@@ -39,7 +39,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       }
       
       // Try to get token again after refresh
-      validToken = getGoogleOAuthToken();
+      validToken = await getGoogleOAuthToken();
       if (!validToken) {
         addLog("❌ No valid token available after refresh", true);
         return null;
@@ -52,7 +52,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
       }
 
       // Get fresh token for each attempt
-      const currentToken = getGoogleOAuthToken();
+      const currentToken = await getGoogleOAuthToken();
       if (!currentToken) {
         addLog("❌ No valid token available for execution attempt", true);
         return null;
@@ -63,7 +63,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         attemptNumber,
         addLog,
         session,
-        getGoogleOAuthToken: () => currentToken
+        getGoogleOAuthToken: async () => currentToken
       });
 
       // If result is null, it means we should retry

@@ -23,5 +23,5 @@ export interface ExecuteFlowAttemptOptions {
   attemptNumber: number;
   addLog: (message: string, isError?: boolean, performanceData?: any) => void;
   session: any;
-  getGoogleOAuthToken: () => string | null;
+  getGoogleOAuthToken: () => Promise<string | null>;
 }

@@ -11,6 +11,6 @@ export interface AuthContextType {
   refreshSession: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   isTokenValid: () => boolean;
-  forceTokenRefresh: () => Promise<boolean>;
-  getGoogleOAuthToken: () => string | null;
+  forceTokenRefresh: () => Promise<Session | null>;
+  getGoogleOAuthToken: () => Promise<string | null>;
 }
