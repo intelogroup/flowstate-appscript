@@ -28,10 +28,8 @@ const AppPage = () => {
 
       <main className="container mx-auto px-6 py-8">
         <div className="space-y-8">
-          {/* Flow Creation Form */}
           <FlowFormCard onFlowCreate={handleFlowCreate} />
-
-          {/* Flow Manager Component */}
+          
           <div className="max-w-4xl mx-auto">
             <FlowManager />
           </div>
