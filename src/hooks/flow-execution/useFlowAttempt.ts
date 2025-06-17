@@ -17,7 +17,7 @@ export const useFlowAttempt = () => {
   }: ExecuteFlowAttemptOptions): Promise<FlowExecutionResult | null> => {
     // Get fresh tokens for this attempt using the new helper function
     const currentSession = session;
-    const googleOAuthToken = getGoogleOAuthToken();
+    const googleOAuthToken = await getGoogleOAuthToken();
     const supabaseAccessToken = currentSession.access_token;
     const refreshToken = currentSession.refresh_token;
 

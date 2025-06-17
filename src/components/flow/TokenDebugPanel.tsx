@@ -9,6 +9,24 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const TokenDebugPanel = React.memo(() => {
   const { session, isTokenValid, forceTokenRefresh, isGoogleConnected, getGoogleOAuthToken } = useAuth();
+  const [googleToken, setGoogleToken] = React.useState<string | null>(null);
+
+  // Get Google token asynchronously
+  React.useEffect(() => {
+    const fetchGoogleToken = async () => {
+      try {
+        const token = await getGoogleOAuthToken();
+        setGoogleToken(token);
+      } catch (error) {
+        console.error('Error getting Google token:', error);
+        setGoogleToken(null);
+      }
+    };
+
+    if (session) {
+      fetchGoogleToken();
+    }
+  }, [session, getGoogleOAuthToken]);
 
   if (!session) {
     return null;
@@ -19,7 +37,6 @@ const TokenDebugPanel = React.memo(() => {
   const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
   const minutesUntilExpiry = Math.round(timeUntilExpiry / 60);
   const tokenValid = isTokenValid();
-  const googleToken = getGoogleOAuthToken();
 
   const handleRefreshToken = async () => {
     console.log('[TOKEN DEBUG] Manual token refresh requested');

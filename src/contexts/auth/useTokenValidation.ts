@@ -26,7 +26,7 @@ export const useTokenValidation = (session: Session | null) => {
     return isValid;
   }, [session]);
 
-  const getGoogleOAuthToken = useCallback((): string | null => {
+  const getGoogleOAuthToken = useCallback(async (): Promise<string | null> => {
     if (!session) {
       console.log('[AUTH] No session available for token extraction');
       return null;
