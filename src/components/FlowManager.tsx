@@ -70,7 +70,13 @@ const FlowManager = () => {
         email_filter: flow.email_filter,
         drive_folder: flow.drive_folder,
         file_types: flow.file_types,
-        userId: flow.user_id
+        auto_run: flow.auto_run,
+        frequency: flow.frequency,
+        user_id: flow.user_id,
+        created_at: flow.created_at,
+        updated_at: flow.updated_at,
+        senders: flow.senders,
+        google_refresh_token: flow.google_refresh_token
       });
 
       if (result?.success) {
