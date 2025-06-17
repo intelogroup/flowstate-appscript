@@ -14,6 +14,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   isTokenValid: () => boolean;
   forceTokenRefresh: () => Promise<boolean>;
+  getGoogleOAuthToken: () => string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -54,6 +55,26 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     });
     
     return isValid;
+  }, [session]);
+
+  // Get the best available Google OAuth token
+  const getGoogleOAuthToken = useCallback((): string | null => {
+    if (!session) {
+      console.log('[AUTH] No session available for token extraction');
+      return null;
+    }
+
+    // Prefer provider_token (original Google OAuth token) but fall back to access_token
+    const token = session.provider_token || session.access_token;
+    
+    console.log('[AUTH] Token extraction:', {
+      hasProviderToken: !!session.provider_token,
+      hasAccessToken: !!session.access_token,
+      usingToken: session.provider_token ? 'provider_token' : 'access_token',
+      tokenLength: token?.length || 0
+    });
+
+    return token || null;
   }, [session]);
 
   // Force token refresh with enhanced error handling
@@ -126,15 +147,15 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
       accessTokenStart: session.access_token?.substring(0, 20) || 'none'
     });
     
-    // For Google OAuth, we need provider, tokens, and valid expiration
+    // For Google OAuth, we need provider AND at least one valid token AND valid expiration
     const isConnected = hasGoogleProvider && (hasProviderToken || hasAccessToken) && tokenIsValid;
     
     if (!isConnected && hasGoogleProvider) {
       if (!tokenIsValid) {
         console.warn('[AUTH] Google provider detected but token expired');
         setAuthError('Google authentication expired - tokens need refresh');
-      } else {
-        console.warn('[AUTH] Google provider detected but missing OAuth tokens');
+      } else if (!hasProviderToken && !hasAccessToken) {
+        console.warn('[AUTH] Google provider detected but missing all OAuth tokens');
         setAuthError('Google authentication incomplete - missing OAuth tokens');
       }
     }
@@ -371,7 +392,8 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     signInWithGoogle,
     isTokenValid,
     forceTokenRefresh,
-  }), [user, session, loading, isGoogleConnected, authError, signOut, refreshSession, signInWithGoogle, isTokenValid, forceTokenRefresh]);
+    getGoogleOAuthToken,
+  }), [user, session, loading, isGoogleConnected, authError, signOut, refreshSession, signInWithGoogle, isTokenValid, forceTokenRefresh, getGoogleOAuthToken]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 });

@@ -4,11 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { RefreshCw, CheckCircle, AlertCircle, Clock, Key } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 const TokenDebugPanel = React.memo(() => {
-  const { session, isTokenValid, forceTokenRefresh, isGoogleConnected } = useAuth();
+  const { session, isTokenValid, forceTokenRefresh, isGoogleConnected, getGoogleOAuthToken } = useAuth();
 
   if (!session) {
     return null;
@@ -19,6 +19,7 @@ const TokenDebugPanel = React.memo(() => {
   const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
   const minutesUntilExpiry = Math.round(timeUntilExpiry / 60);
   const tokenValid = isTokenValid();
+  const googleToken = getGoogleOAuthToken();
 
   const handleRefreshToken = async () => {
     console.log('[TOKEN DEBUG] Manual token refresh requested');
@@ -41,7 +42,7 @@ const TokenDebugPanel = React.memo(() => {
     <Card className="border-dashed">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm flex items-center space-x-2">
-          <span>🔐 Token Debug Panel</span>
+          <span>🔐 Token Debug Panel (Enhanced)</span>
           <Button
             variant="ghost"
             size="sm"
@@ -101,6 +102,22 @@ const TokenDebugPanel = React.memo(() => {
               {session.access_token ? `${session.access_token.length} chars` : 'None'}
             </span>
           </div>
+
+          <div className="col-span-2">
+            <span className="text-gray-500">Active Google Token:</span>
+            <div className="flex items-center space-x-2 mt-1">
+              <Key className="w-3 h-3" />
+              <span className="font-mono text-xs">
+                {googleToken ? (
+                  <Badge variant="default" className="text-xs">
+                    {session.provider_token ? 'Using provider_token' : 'Using access_token'} ({googleToken.length} chars)
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive" className="text-xs">No token available</Badge>
+                )}
+              </span>
+            </div>
+          </div>
         </div>
 
         {!tokenValid && (
@@ -117,6 +134,15 @@ const TokenDebugPanel = React.memo(() => {
             <Clock className="h-4 w-4" />
             <AlertDescription className="text-xs">
               Token expires in {minutesUntilExpiry} minutes. Consider refreshing.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {session.provider_token && !session.provider_token && session.access_token && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="text-xs">
+              Provider token lost after refresh, using access_token as fallback. This should work for most operations.
             </AlertDescription>
           </Alert>
         )}

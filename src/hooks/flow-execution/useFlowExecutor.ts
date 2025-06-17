@@ -12,7 +12,7 @@ interface UseFlowExecutorProps {
 export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
   const [runningFlows, setRunningFlows] = useState<Set<string>>(new Set());
   const { toast } = useToast();
-  const { session, isGoogleConnected, refreshSession, forceTokenRefresh, isTokenValid, signInWithGoogle } = useAuth();
+  const { session, isGoogleConnected, refreshSession, forceTokenRefresh, isTokenValid, signInWithGoogle, getGoogleOAuthToken } = useAuth();
 
   const executeFlow = useCallback(async (flow: UserFlow): Promise<FlowExecutionResult | null> => {
     if (!session || !session.user) {
@@ -56,9 +56,9 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
     }
 
     const executeFlowAttempt = async (attemptNumber: number): Promise<FlowExecutionResult | null> => {
-      // Get fresh tokens for this attempt
+      // Get fresh tokens for this attempt using the new helper function
       const currentSession = session;
-      const googleOAuthToken = currentSession.provider_token || currentSession.access_token;
+      const googleOAuthToken = getGoogleOAuthToken();
       const supabaseAccessToken = currentSession.access_token;
       const refreshToken = currentSession.refresh_token;
 
@@ -269,7 +269,7 @@ export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
         return newSet;
       });
     }
-  }, [session, isGoogleConnected, addLog, toast, forceTokenRefresh, isTokenValid]);
+  }, [session, isGoogleConnected, addLog, toast, forceTokenRefresh, isTokenValid, getGoogleOAuthToken]);
 
   return {
     runningFlows,
