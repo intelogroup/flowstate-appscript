@@ -5,7 +5,7 @@ import { Zap, ArrowRight } from 'lucide-react';
 import FlowCreationForm from './FlowCreationForm';
 
 interface FlowFormCardProps {
-  onFlowCreate: (flowData: any) => void;
+  onFlowCreate: (flowData: any) => Promise<void>;
 }
 
 const FlowFormCard = React.memo(({ onFlowCreate }: FlowFormCardProps) => {
