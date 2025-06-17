@@ -33,6 +33,10 @@ const FlowManager = React.memo(() => {
     await deleteFlow(flowId);
   }, [deleteFlow]);
 
+  const handleConnectivityCheck = React.useCallback(async (): Promise<boolean> => {
+    return await checkConnectivity();
+  }, [checkConnectivity]);
+
   const exportLogs = React.useCallback(() => {
     const logsText = executionLogs.join('\n');
     const blob = new Blob([logsText], { type: 'text/plain' });
@@ -57,7 +61,7 @@ const FlowManager = React.memo(() => {
 
       {/* Performance Monitor */}
       <PerformanceMonitor 
-        onHealthCheck={checkConnectivity}
+        onHealthCheck={handleConnectivityCheck}
         executionLogs={executionLogs}
       />
 

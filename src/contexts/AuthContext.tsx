@@ -1,12 +1,11 @@
-
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { AuthContextType } from './auth/types';
 import { useTokenValidation } from './auth/useTokenValidation';
-import { useTokenRefresh } from './auth/useTokenRefresh';
 import { useGoogleConnection } from './auth/useGoogleConnection';
 import { useAuthActions } from './auth/useAuthActions';
+import { useEnhancedTokenManagement } from './auth/useEnhancedTokenManagement';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -23,9 +22,21 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  
+  // Ref to track if component is mounted
+  const mountedRef = useRef(true);
 
+  // Enhanced token management with race condition protection
+  const {
+    forceTokenRefresh,
+    getValidGoogleToken,
+    ensureValidSession,
+    scheduleTokenRefresh,
+    cleanup
+  } = useEnhancedTokenManagement(setSession, setUser, setAuthError);
+
+  // Existing hooks with enhanced token management
   const { isTokenValid, getGoogleOAuthToken } = useTokenValidation(session);
-  const { forceTokenRefresh } = useTokenRefresh(setSession, setUser, setAuthError);
   const { isGoogleConnected } = useGoogleConnection(session, isTokenValid, setAuthError);
   const { signInWithGoogle, refreshSession, signOut } = useAuthActions(
     setAuthError,
@@ -35,27 +46,19 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     forceTokenRefresh
   );
 
+  // Set up auth state listener with enhanced token handling
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
-    // Set up auth state listener with enhanced token debugging
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (!mounted) return;
+        if (!mountedRef.current) return;
 
-        console.log('[AUTH] Auth state change:', event);
-        console.log('[AUTH] Session detailed analysis:', {
+        console.log('[AUTH] Auth state change:', event, {
           hasSession: !!session,
-          hasUser: !!session?.user,
           provider: session?.user?.app_metadata?.provider,
-          hasAccessToken: !!session?.access_token,
           hasProviderToken: !!session?.provider_token,
-          hasRefreshToken: !!session?.refresh_token,
-          sessionKeys: session ? Object.keys(session) : [],
-          userKeys: session?.user ? Object.keys(session.user) : [],
-          // Safe token previews for debugging
-          accessTokenPreview: session?.access_token?.substring(0, 20) || 'none',
-          providerTokenPreview: session?.provider_token?.substring(0, 20) || 'none',
+          hasAccessToken: !!session?.access_token,
           expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'none'
         });
         
@@ -67,25 +70,20 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
           setAuthError(null);
           console.log('[AUTH] User signed in successfully');
           
-          // Validate Google OAuth tokens immediately after sign-in
-          if (session.user?.app_metadata?.provider === 'google') {
-            if (!session.provider_token && !session.access_token) {
-              console.error('[AUTH] Google sign-in completed but missing OAuth tokens!');
-              setAuthError('Google authentication incomplete - missing access tokens. Please try signing in again.');
-            } else {
-              console.log('[AUTH] Google OAuth tokens validated successfully');
-            }
-          }
+          // Schedule proactive token refresh
+          scheduleTokenRefresh(session);
         }
         
         if (event === 'SIGNED_OUT') {
           console.log('[AUTH] User signed out');
           setAuthError(null);
+          cleanup(); // Clean up scheduled refreshes
         }
 
-        if (event === 'TOKEN_REFRESHED') {
-          console.log('[AUTH] Token refreshed successfully');
+        if (event === 'TOKEN_REFRESHED' && session) {
+          console.log('[AUTH] Token refreshed via auth state change');
           setAuthError(null);
+          scheduleTokenRefresh(session);
         }
 
         // Only set loading to false after the first auth state change
@@ -95,13 +93,13 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
       }
     );
 
-    // Check for existing session with enhanced debugging
+    // Initialize auth state with enhanced validation
     const initializeAuth = async () => {
       try {
-        console.log('[AUTH] Initializing auth...');
+        console.log('[AUTH] Initializing enhanced auth...');
         const { data: { session }, error } = await supabase.auth.getSession();
         
-        if (!mounted) return;
+        if (!mountedRef.current) return;
 
         if (error) {
           console.error('[AUTH] Error getting session:', error);
@@ -110,43 +108,41 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
           return;
         }
 
-        console.log('[AUTH] Initial session comprehensive check:', {
+        console.log('[AUTH] Initial session check:', {
           hasSession: !!session,
           provider: session?.user?.app_metadata?.provider,
-          hasAccessToken: !!session?.access_token,
           hasProviderToken: !!session?.provider_token,
-          hasRefreshToken: !!session?.refresh_token,
-          expiresAt: session?.expires_at,
-          tokenTypes: session ? Object.keys(session).filter(key => key.includes('token')) : [],
-          // Preview tokens safely
-          accessTokenStart: session?.access_token?.substring(0, 20) || 'none',
-          providerTokenStart: session?.provider_token?.substring(0, 20) || 'none'
+          hasAccessToken: !!session?.access_token,
+          expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'none'
         });
         
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
 
-        // Enhanced Google token validation with auto-refresh
+        // Enhanced Google token validation with proactive refresh
         if (session && session.user?.app_metadata?.provider === 'google') {
-          const tokenValid = session.expires_at ? session.expires_at > (Date.now() / 1000) + 300 : false;
+          const now = Date.now() / 1000;
+          const expiresAt = session.expires_at || 0;
+          const timeUntilExpiry = expiresAt - now;
           
           if (!session.provider_token && !session.access_token) {
             console.error('[AUTH] Google session exists but missing all OAuth tokens');
-            setAuthError('Google authentication incomplete. Please sign in again to get proper access tokens.');
-          } else if (!tokenValid) {
-            console.log('[AUTH] Google tokens present but expired, attempting auto-refresh...');
+            setAuthError('Google authentication incomplete. Please sign in again.');
+          } else if (timeUntilExpiry <= 300) { // 5 minutes buffer
+            console.log('[AUTH] Google tokens expire soon, attempting proactive refresh...');
             const refreshSuccess = await forceTokenRefresh();
             if (!refreshSuccess) {
               setAuthError('Google tokens expired and refresh failed. Please sign in again.');
             }
           } else {
             console.log('[AUTH] Google session validated with valid tokens');
+            scheduleTokenRefresh(session);
           }
         }
       } catch (error) {
         console.error('[AUTH] Error during auth initialization:', error);
-        if (mounted) {
+        if (mountedRef.current) {
           setAuthError('Authentication initialization failed');
           setLoading(false);
         }
@@ -156,38 +152,13 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     initializeAuth();
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       subscription.unsubscribe();
+      cleanup();
     };
-  }, []); // Empty dependency array is correct here
+  }, []); // Empty dependency array is correct
 
-  // Enhanced auto-refresh tokens before they expire
-  useEffect(() => {
-    if (!session?.expires_at) return;
-
-    const now = Date.now() / 1000;
-    const expiresAt = session.expires_at;
-    
-    // Refresh 5 minutes before expiration
-    const refreshTime = (expiresAt - now - 300) * 1000;
-    
-    console.log('[AUTH] Token expiration check:', {
-      expiresAt: new Date(expiresAt * 1000).toISOString(),
-      now: new Date(now * 1000).toISOString(),
-      refreshInMs: refreshTime,
-      willAutoRefresh: refreshTime > 0
-    });
-    
-    if (refreshTime > 0) {
-      const timeoutId = setTimeout(() => {
-        console.log('[AUTH] Auto-refreshing session before expiration...');
-        forceTokenRefresh();
-      }, refreshTime);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [session?.expires_at, forceTokenRefresh]);
-
+  // Enhanced value with new token management functions
   const value = useMemo(() => ({
     user,
     session,
@@ -199,8 +170,20 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
     signInWithGoogle,
     isTokenValid,
     forceTokenRefresh,
-    getGoogleOAuthToken,
-  }), [user, session, loading, isGoogleConnected, authError, signOut, refreshSession, signInWithGoogle, isTokenValid, forceTokenRefresh, getGoogleOAuthToken]);
+    getGoogleOAuthToken: getValidGoogleToken, // Use the enhanced version
+  }), [
+    user, 
+    session, 
+    loading, 
+    isGoogleConnected, 
+    authError, 
+    signOut, 
+    refreshSession, 
+    signInWithGoogle, 
+    isTokenValid, 
+    forceTokenRefresh, 
+    getValidGoogleToken
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 });

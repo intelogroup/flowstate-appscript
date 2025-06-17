@@ -15,7 +15,7 @@ export interface FlowExecutionHookReturn {
   executeFlow: (flow: UserFlow) => Promise<FlowExecutionResult | null>;
   clearLogs: () => void;
   addLog: (message: string, isError?: boolean, performanceData?: any) => void;
-  checkConnectivity: () => Promise<void>;
+  checkConnectivity: () => Promise<boolean>;
 }
 
 export interface ExecuteFlowAttemptOptions {
