@@ -1,4 +1,3 @@
-
 /**
  * Apps Script Web App Template for Gmail to Drive Flow
  * Updated for Body-Based Authentication (FIXED VERSION)
@@ -15,7 +14,7 @@
  */
 
 function doPost(e) {
-  // 1. Retrieve your secret from Script Properties
+  // 1. Retrieve your secret from Script Properties - FIXED: Use correct property name
   const SCRIPT_SECRET = PropertiesService.getScriptProperties().getProperty('APPS_SCRIPT_SECRET');
   
   try {
@@ -35,17 +34,26 @@ function doPost(e) {
       hasSecret: !!receivedSecret,
       hasPayload: !!payload,
       action: payload?.action,
-      flowId: payload?.flowId
+      flowId: payload?.flowId,
+      secretLength: receivedSecret?.length || 0,
+      expectedSecretLength: SCRIPT_SECRET?.length || 0
     });
     
     // 3. AUTHENTICATION CHECK: This is the security gate
     if (!SCRIPT_SECRET) {
       console.error('❌ APPS_SCRIPT_SECRET not configured in Script Properties');
-      return createErrorResponse('Server configuration error: Secret not configured');
+      return createErrorResponse('Server configuration error: Secret not configured in APPS_SCRIPT_SECRET property');
     }
     
     if (receivedSecret !== SCRIPT_SECRET) {
       console.error('❌ Authentication failed: Invalid secret');
+      console.error('Secret comparison:', {
+        received: receivedSecret?.substring(0, 10) + '...',
+        expected: SCRIPT_SECRET?.substring(0, 10) + '...',
+        receivedLength: receivedSecret?.length || 0,
+        expectedLength: SCRIPT_SECRET?.length || 0,
+        match: receivedSecret === SCRIPT_SECRET
+      });
       return createErrorResponse('Unauthorized: Invalid authentication secret');
     }
     
@@ -114,6 +122,13 @@ function processFlowExecution(payload) {
 function processGmailFlow(userConfig, googleTokens) {
   try {
     console.log('📧 Processing Gmail flow for:', userConfig?.flowName);
+    console.log('🔍 User config received:', {
+      senders: userConfig?.senders,
+      driveFolder: userConfig?.driveFolder,
+      fileTypes: userConfig?.fileTypes,
+      maxEmails: userConfig?.maxEmails,
+      flowName: userConfig?.flowName
+    });
     
     // Extract access token
     const accessToken = googleTokens?.access_token;
@@ -123,12 +138,35 @@ function processGmailFlow(userConfig, googleTokens) {
       return createErrorResponse('Google OAuth access token required');
     }
     
+    console.log('🔑 Using Google access token:', accessToken.substring(0, 20) + '...');
+    
+    // Build Gmail search query from senders field
+    let searchQuery = '';
+    if (userConfig.senders && userConfig.senders.trim()) {
+      const senders = userConfig.senders.split(',').map(s => s.trim()).filter(s => s);
+      if (senders.length === 1) {
+        searchQuery = `from:${senders[0]}`;
+      } else if (senders.length > 1) {
+        searchQuery = `(${senders.map(s => `from:${s}`).join(' OR ')})`;
+      }
+    }
+    
+    // Add attachment filter
+    if (searchQuery) {
+      searchQuery += ' has:attachment';
+    } else {
+      searchQuery = 'has:attachment';
+    }
+    
+    console.log('🔍 Gmail search query:', searchQuery);
+    
     // Search for emails using the user's filter
-    const threads = GmailApp.search(userConfig.emailFilter, 0, 50);
+    const threads = GmailApp.search(searchQuery, 0, userConfig.maxEmails || 50);
     let processedCount = 0;
     let attachmentCount = 0;
+    let emailsFound = threads.length;
     
-    console.log(`📨 Found ${threads.length} email threads matching filter`);
+    console.log(`📨 Found ${emailsFound} email threads matching filter`);
     
     threads.forEach(thread => {
       const messages = thread.getMessages();
@@ -165,8 +203,17 @@ function processGmailFlow(userConfig, googleTokens) {
       data: {
         processedEmails: processedCount,
         savedAttachments: attachmentCount,
+        emailsFound: emailsFound,
+        attachments: attachmentCount, // For compatibility
         flowName: userConfig.flowName,
-        authMethod: 'body-based'
+        authMethod: 'body-based',
+        searchQuery: searchQuery,
+        debugInfo: {
+          searchQuery: searchQuery,
+          emailsFound: emailsFound,
+          processedEmails: processedCount,
+          savedAttachments: attachmentCount
+        }
       }
     };
     
@@ -242,11 +289,37 @@ function testFunction() {
   return 'Success';
 }
 
+// IMPORTANT: Setup function to configure your secret
+function setupSecret() {
+  // Replace 'your-secret-here' with your actual secret from Supabase APPS_SCRIPT_SECRET
+  const secret = 'your-secret-here';
+  PropertiesService.getScriptProperties().setProperty('APPS_SCRIPT_SECRET', secret);
+  console.log('✅ APPS_SCRIPT_SECRET configured successfully!');
+  console.log('Secret length:', secret.length);
+}
+
+// Debug function to check your current configuration
+function checkConfiguration() {
+  const secret = PropertiesService.getScriptProperties().getProperty('APPS_SCRIPT_SECRET');
+  console.log('Current APPS_SCRIPT_SECRET:', secret ? 'SET (' + secret.length + ' chars)' : 'NOT SET');
+  
+  if (!secret) {
+    console.log('❌ Secret not configured. Run setupSecret() first.');
+  } else {
+    console.log('✅ Secret is configured correctly.');
+    console.log('Secret preview:', secret.substring(0, 10) + '...');
+  }
+  
+  return {
+    secretConfigured: !!secret,
+    secretLength: secret?.length || 0
+  };
+}
+
 /**
  * SETUP CHECKLIST FOR BODY-BASED AUTHENTICATION:
  * 
- * 1. ✅ Set your secret in Script Properties:
- *    PropertiesService.getScriptProperties().setProperty('APPS_SCRIPT_SECRET', 'your-secret-here')
+ * 1. ✅ Run setupSecret() function in Apps Script to set APPS_SCRIPT_SECRET
  * 
  * 2. ✅ Deploy this script as a Web App with:
  *    - Execute as: "Me" (your account)
@@ -256,7 +329,7 @@ function testFunction() {
  * 
  * 4. ✅ Copy your secret to your Supabase APPS_SCRIPT_SECRET secret
  * 
- * 5. ✅ Test the deployment - the secret is now validated in the request body
+ * 5. ✅ Test the deployment using checkConfiguration() function
  * 
  * 6. ✅ Enable Gmail API and Drive API in your Apps Script project
  * 
