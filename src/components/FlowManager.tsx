@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,7 +9,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFlowManagement } from '@/hooks/useFlowManagement';
 import { useFlowExecutor } from '@/hooks/flow-execution/useFlowExecutor';
 import FlowCard from '@/components/flow/FlowCard';
-import CreateFlowForm from '@/components/flow/CreateFlowForm';
 import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import DebugPanel from '@/components/flow/DebugPanel';
 import TokenDebugPanel from '@/components/flow/TokenDebugPanel';
@@ -66,10 +66,10 @@ const FlowManager = () => {
     try {
       const result = await executeFlow({
         id: flow.id,
-        flowName: flow.flow_name,
-        emailFilter: flow.email_filter,
-        driveFolder: flow.drive_folder,
-        fileTypes: flow.file_types,
+        flow_name: flow.flow_name,
+        email_filter: flow.email_filter,
+        drive_folder: flow.drive_folder,
+        file_types: flow.file_types,
         userId: flow.user_id
       });
 
@@ -142,8 +142,12 @@ const FlowManager = () => {
                     <FlowCard
                       key={flow.id}
                       flow={flow}
-                      onExecute={() => handleExecuteFlow(flow.id)}
+                      onRun={() => handleExecuteFlow(flow.id)}
+                      onDelete={() => {}} // Add delete functionality as needed
                       isRunning={runningFlows.has(flow.id)}
+                      hasGoogleAuth={isGoogleConnected}
+                      isOnCooldown={false}
+                      cooldownDisplay=""
                     />
                   ))}
                 </div>
@@ -168,12 +172,31 @@ const FlowManager = () => {
 
           {/* Performance Monitor */}
           {performanceData.length > 0 && (
-            <PerformanceMonitor data={performanceData} />
+            <Card>
+              <CardHeader>
+                <CardTitle>Performance Monitor</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-gray-600">
+                  Performance data for the last {performanceData.length} executions
+                </div>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
         <TabsContent value="create">
-          <CreateFlowForm onSuccess={() => setActiveTab('flows')} />
+          <Card>
+            <CardHeader>
+              <CardTitle>Create New Flow</CardTitle>
+              <CardDescription>
+                Set up a new automated flow to save Gmail attachments to Google Drive
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-500">Flow creation form will be implemented here.</p>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -184,7 +207,28 @@ const FlowManager = () => {
           <SavedTokensPanel />
         </div>
         <div>
-          <DebugPanel logs={logs} />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Debug Logs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {logs.map(log => (
+                  <div 
+                    key={log.id} 
+                    className={`text-xs p-2 rounded ${log.isError ? 'bg-red-50 text-red-800' : 'bg-gray-50'}`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <span className="font-mono">{log.message}</span>
+                      <span className="text-gray-400 ml-2">
+                        {log.timestamp.toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

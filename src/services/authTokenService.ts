@@ -20,7 +20,7 @@ export class AuthTokenService {
       throw new Error('No user ID found in session');
     }
 
-    const tokenData: Partial<AuthToken> = {
+    const tokenData = {
       user_id: session.user.id,
       provider: session.user.app_metadata?.provider || 'google',
       access_token: session.access_token,
@@ -63,7 +63,7 @@ export class AuthTokenService {
       // Insert new tokens
       const { error } = await supabase
         .from('user_auth_tokens')
-        .insert([tokenData]);
+        .insert(tokenData);
 
       if (error) {
         console.error('[AUTH TOKENS] Error saving tokens:', error);
