@@ -4,7 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ExecuteFlowAttemptOptions } from './types';
 import { useFlowRetry } from './useFlowRetry';
 
-export const useFlowExecution = () => {
+export const useFlowAttempt = () => {
   const { toast } = useToast();
   const { handleRetry, handlePersistentError } = useFlowRetry();
 

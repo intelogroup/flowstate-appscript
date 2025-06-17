@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { FlowExecutionResult } from '@/services/flowService';
-import { useFlowExecution } from './useFlowExecution';
+import { useFlowAttempt } from './useFlowAttempt';
 import type { UserFlow } from './types';
 
 interface UseFlowExecutorProps {
@@ -12,7 +12,7 @@ interface UseFlowExecutorProps {
 export const useFlowExecutor = ({ addLog }: UseFlowExecutorProps) => {
   const [runningFlows, setRunningFlows] = useState<Set<string>>(new Set());
   const { session, isGoogleConnected, isTokenValid, getGoogleOAuthToken } = useAuth();
-  const { executeFlowAttempt } = useFlowExecution();
+  const { executeFlowAttempt } = useFlowAttempt();
 
   const executeFlow = useCallback(async (flow: UserFlow): Promise<FlowExecutionResult | null> => {
     if (!session || !session.user) {
