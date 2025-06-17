@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
 import { extractDebugInfo, logNetworkEvent, generateRequestId, createRetryableError } from "../_shared/network-utils.ts"
@@ -295,92 +296,46 @@ serve(async (req) => {
       request_id: debugInfo.request_id
     });
 
-    // Create proper Apps Script payload format with enhanced debugging
+    // Create proper Apps Script payload format matching V.06 template structure
     let bodyForGas;
     
-    if (originalPayload.action === 'process_gmail_flow') {
-      // Direct process_gmail_flow action
+    // FIXED: Apps Script V.06 expects nested secret/payload structure
+    if (originalPayload.action === 'process_gmail_flow' || originalPayload.action === 'run_flow') {
       bodyForGas = {
-        secret: appsScriptSecret,
+        secret: appsScriptSecret,  // Apps Script checks this in doPost()
         payload: {
-          action: 'process_gmail_flow',
+          action: 'process_gmail_flow',  // Always use process_gmail_flow for Gmail operations
           userConfig: {
-            ...originalPayload.userConfig,
+            // Map emailFilter to senders for V.06 compatibility
+            senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter || '',
+            driveFolder: originalPayload.userConfig?.driveFolder || '/Email Attachments',
+            fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
+            flowName: originalPayload.userConfig?.flowName || 'Default Flow',
             maxEmails: originalPayload.userConfig?.maxEmails || 5,
             enableDebugMode: true,
             showEmailDetails: true
           },
-          // Send the Google OAuth token in the format Apps Script expects
-          access_token: googleOAuthToken,
-          auth_token: googleOAuthToken,
+          // Include Google tokens for Gmail access
           googleTokens: {
-            access_token: googleOAuthToken,
+            access_token: googleOAuthToken || '',
             refresh_token: originalPayload.googleTokens?.refresh_token || '',
-            provider_token: googleOAuthToken
-          },
-          debug_info: {
-            ...debugInfo,
-            supabase_timestamp: new Date().toISOString(),
-            auth_method: 'body-based-v6',
-            timeout_config: getTimeoutForOperation(originalPayload.action, originalPayload.userConfig),
-            request_source: 'edge-function-enhanced-debug',
-            token_debug: {
-              token_source: originalPayload.auth_token ? 'auth_token' : 
-                           originalPayload.access_token ? 'access_token' : 'googleTokens.access_token',
-              token_length: googleOAuthToken?.length || 0
-            }
-          }
-        }
-      };
-    } else if (originalPayload.action === 'run_flow') {
-      // Convert run_flow to the format Apps Script expects
-      bodyForGas = {
-        secret: appsScriptSecret,
-        payload: {
-          action: 'process_gmail_flow',
-          userConfig: {
-            ...originalPayload.userConfig,
-            maxEmails: originalPayload.userConfig?.maxEmails || 5,
-            enableDebugMode: true,
-            showEmailDetails: true
-          },
-          // Send the Google OAuth token in the format Apps Script expects
-          access_token: googleOAuthToken,
-          auth_token: googleOAuthToken,
-          googleTokens: {
-            access_token: googleOAuthToken,
-            refresh_token: originalPayload.googleTokens?.refresh_token || '',
-            provider_token: googleOAuthToken
+            provider_token: googleOAuthToken || ''
           },
           debug_info: {
             ...debugInfo,
             supabase_timestamp: new Date().toISOString(),
             auth_method: 'body-based-v6',
             timeout_config: getTimeoutForOperation('process_gmail_flow', originalPayload.userConfig),
-            request_source: 'edge-function-enhanced-debug'
-          }
-        }
-      };
-    } else if (originalPayload.action === 'set_flow') {
-      bodyForGas = {
-        secret: appsScriptSecret,
-        payload: {
-          action: 'set_flow',
-          userConfig: originalPayload.userConfig,
-          debug_info: {
-            ...debugInfo,
-            supabase_timestamp: new Date().toISOString(),
-            auth_method: 'body-based-v6'
+            request_source: 'edge-function-v6-fixed'
           }
         }
       };
     } else {
+      // Handle other actions with correct V.06 structure
       bodyForGas = {
         secret: appsScriptSecret,
         payload: {
           ...originalPayload,
-          access_token: googleOAuthToken,
-          auth_token: googleOAuthToken,
           debug_info: {
             ...debugInfo,
             supabase_timestamp: new Date().toISOString(),
@@ -398,17 +353,14 @@ serve(async (req) => {
       action: bodyForGas.payload.action,
       hasSecret: !!bodyForGas.secret,
       hasUserConfig: !!bodyForGas.payload.userConfig,
-      hasAccessToken: !!bodyForGas.payload.access_token,
-      hasAuthToken: !!bodyForGas.payload.auth_token,
+      senders: bodyForGas.payload.userConfig?.senders,
+      driveFolder: bodyForGas.payload.userConfig?.driveFolder,
       request_id: debugInfo.request_id,
       payload_size: JSON.stringify(bodyForGas).length,
       timeout: timeoutMs,
       maxEmails: bodyForGas.payload.userConfig?.maxEmails,
       debugMode: bodyForGas.payload.userConfig?.enableDebugMode,
-      tokenDebug: {
-        tokenLength: googleOAuthToken?.length || 0,
-        tokenPreview: googleOAuthToken?.substring(0, 20) + '...' || 'none'
-      }
+      v6_structure: true
     });
 
     // Call Apps Script with retry logic
@@ -503,12 +455,7 @@ serve(async (req) => {
         apps_script_url: appsScriptUrl,
         error_details: responseText.substring(0, 200),
         auth_method: 'body-based-v6',
-        token_info: {
-          has_token: !!googleOAuthToken,
-          token_length: googleOAuthToken?.length || 0,
-          token_source: originalPayload.auth_token ? 'auth_token' : 
-                       originalPayload.access_token ? 'access_token' : 'googleTokens'
-        }
+        v6_payload_structure: true
       }, 502);
     }
 
@@ -554,6 +501,7 @@ serve(async (req) => {
       timestamp: new Date().toISOString(),
       request_id: debugInfo.request_id,
       auth_method: 'body-based-v6',
+      v6_payload_structure: true,
       performance_metrics: {
         total_duration: totalDuration,
         timeout_used: timeoutMs,
