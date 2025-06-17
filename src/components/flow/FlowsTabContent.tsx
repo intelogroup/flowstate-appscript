@@ -13,6 +13,7 @@ interface FlowsTabContentProps {
   isGoogleConnected: boolean;
   onRefresh: () => void;
   onExecuteFlow: (flowId: string) => void;
+  onDeleteFlow?: (flowId: string) => void;
   onCreateTab: () => void;
 }
 
@@ -23,8 +24,26 @@ const FlowsTabContent = ({
   isGoogleConnected,
   onRefresh,
   onExecuteFlow,
+  onDeleteFlow,
   onCreateTab
 }: FlowsTabContentProps) => {
+  const handleRunFlow = (flow: any) => {
+    console.log('[FLOWS_TAB] Running flow:', flow.id, flow.flow_name);
+    onExecuteFlow(flow.id);
+  };
+
+  const handleDeleteFlow = (flowId: string) => {
+    console.log('[FLOWS_TAB] Deleting flow:', flowId);
+    if (onDeleteFlow) {
+      onDeleteFlow(flowId);
+    }
+  };
+
+  const getCooldownInfo = (flowId: string) => {
+    // Simple cooldown logic - no cooldown for now
+    return { isOnCooldown: false, displayTime: '' };
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
@@ -56,19 +75,23 @@ const FlowsTabContent = ({
               </div>
             </div>
           ) : userFlows && userFlows.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {userFlows.map(flow => (
-                <FlowCard
-                  key={flow.id}
-                  flow={flow}
-                  onRun={() => onExecuteFlow(flow.id)}
-                  onDelete={() => {}}
-                  isRunning={runningFlows.has(flow.id)}
-                  hasGoogleAuth={isGoogleConnected}
-                  isOnCooldown={false}
-                  cooldownDisplay=""
-                />
-              ))}
+            <div className="space-y-4">
+              {userFlows.map(flow => {
+                const cooldownInfo = getCooldownInfo(flow.id);
+                
+                return (
+                  <FlowCard
+                    key={flow.id}
+                    flow={flow}
+                    onRun={handleRunFlow}
+                    onDelete={handleDeleteFlow}
+                    isRunning={runningFlows.has(flow.id)}
+                    hasGoogleAuth={isGoogleConnected}
+                    isOnCooldown={cooldownInfo.isOnCooldown}
+                    cooldownDisplay={cooldownInfo.displayTime}
+                  />
+                );
+              })}
             </div>
           ) : (
             <Alert>

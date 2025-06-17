@@ -13,23 +13,27 @@ import type { UserFlow } from '@/hooks/flow-execution/types';
 
 const FlowManager = () => {
   const { user, isGoogleConnected } = useAuth();
-  const { userFlows, isLoading, refetch } = useFlowManagement();
+  const { userFlows, isLoading, refetch, deleteFlow } = useFlowManagement();
   const { logs, performanceData, addLog } = useFlowLogs();
   const [activeTab, setActiveTab] = useState('flows');
 
   const { runningFlows, executeFlow } = useFlowExecutor({ addLog });
 
   const handleExecuteFlow = async (flowId: string) => {
+    console.log('[FLOW_MANAGER] Execute flow requested:', flowId);
+    
     if (!user || !isGoogleConnected) {
-      addLog('Authentication required to execute flows', true);
+      addLog('❌ Authentication required to execute flows', true);
       return;
     }
 
     const flow = userFlows?.find(f => f.id === flowId);
     if (!flow) {
-      addLog(`Flow with ID ${flowId} not found`, true);
+      addLog(`❌ Flow with ID ${flowId} not found`, true);
       return;
     }
+
+    console.log('[FLOW_MANAGER] Found flow:', flow.flow_name);
 
     const userFlow: UserFlow = {
       id: flow.id,
@@ -47,6 +51,16 @@ const FlowManager = () => {
     };
 
     await executeFlow(userFlow);
+  };
+
+  const handleDeleteFlow = async (flowId: string) => {
+    console.log('[FLOW_MANAGER] Delete flow requested:', flowId);
+    try {
+      await deleteFlow(flowId);
+      addLog(`🗑️ Flow deleted successfully`);
+    } catch (error) {
+      addLog(`❌ Failed to delete flow: ${error instanceof Error ? error.message : 'Unknown error'}`, true);
+    }
   };
 
   useEffect(() => {
@@ -73,6 +87,7 @@ const FlowManager = () => {
             isGoogleConnected={isGoogleConnected}
             onRefresh={refetch}
             onExecuteFlow={handleExecuteFlow}
+            onDeleteFlow={handleDeleteFlow}
             onCreateTab={() => setActiveTab('create')}
           />
         </TabsContent>
