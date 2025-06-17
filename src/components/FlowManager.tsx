@@ -14,6 +14,7 @@ import FlowManagerHeader from './flow/FlowManagerHeader';
 import LoadingState from './flow/LoadingState';
 import PerformanceMonitor from './flow/PerformanceMonitor';
 import FlowList from './flow/FlowList';
+import TokenDebugPanel from './flow/TokenDebugPanel';
 
 const FlowManager = React.memo(() => {
   const { session, isGoogleConnected } = useAuth();
@@ -51,6 +52,9 @@ const FlowManager = React.memo(() => {
 
   return (
     <div className="space-y-6">
+      {/* Token Debug Panel - Show when user is authenticated */}
+      {session && <TokenDebugPanel />}
+
       {/* Performance Monitor */}
       <PerformanceMonitor 
         onHealthCheck={checkConnectivity}
