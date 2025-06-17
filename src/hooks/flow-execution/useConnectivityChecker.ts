@@ -6,7 +6,7 @@ interface UseConnectivityCheckerProps {
 }
 
 export const useConnectivityChecker = ({ addLog }: UseConnectivityCheckerProps) => {
-  const checkConnectivity = useCallback(async (): Promise<void> => {
+  const checkConnectivity = useCallback(async (): Promise<boolean> => {
     try {
       addLog("🔍 Checking connectivity to Apps Script...", false);
       
@@ -19,12 +19,15 @@ export const useConnectivityChecker = ({ addLog }: UseConnectivityCheckerProps) 
 
       if (response.ok) {
         addLog("✅ Connectivity check successful", false);
+        return true;
       } else {
         addLog(`⚠️ Connectivity check failed: ${response.status}`, true);
+        return false;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog(`❌ Connectivity check error: ${errorMessage}`, true);
+      return false;
     }
   }, [addLog]);
 
