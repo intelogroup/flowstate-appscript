@@ -57,24 +57,15 @@ export const useFlowAttempt = () => {
         senders: flow.senders || '', // Use the new senders field
         driveFolder: flow.drive_folder,
         fileTypes: flow.file_types || [],
-        userId: flow.id,
+        userId: flow.user_id,
         flowName: flow.flow_name,
         maxEmails: 10, // Let Apps Script decide the optimal number
-        enableDebugMode: true, // Enable for better debugging
-        showEmailDetails: true // Show email details in debug
-      };
-
-      // Use the correct Google OAuth token for Apps Script
-      const googleTokens = {
-        access_token: googleOAuthToken || '', // Use the Google OAuth token we found
-        refresh_token: refreshToken || '',
-        provider_token: googleOAuthToken || '' // Same as access_token for consistency
+        enableDebugMode: true // Enable for better debugging
       };
 
       addLog(`📋 Using simplified payload - Apps Script will handle time filtering`);
-      addLog(`🔐 Google OAuth token prepared: ${googleTokens.access_token.substring(0, 20)}...`);
       
-      const result = await FlowService.executeFlow(flow.id, userConfig, googleTokens);
+      const result = await FlowService.executeFlow(flow.id, userConfig);
 
       const executionTime = Date.now() - startTime;
       
@@ -94,7 +85,7 @@ export const useFlowAttempt = () => {
           // Enhanced debugging for no attachments found
           const debugInfo = result.data?.debugInfo || {};
           const emailsFound = result.data?.emailsFound || 0;
-          const emailsProcessed = result.data?.processed || 0;
+          const emailsProcessed = result.data?.processedEmails || 0;
           
           if (emailsFound > 0) {
             addLog(`📧 Found ${emailsFound} emails but ${emailsProcessed} were processed with 0 attachments`);
@@ -125,7 +116,7 @@ export const useFlowAttempt = () => {
         // Log performance metrics if available
         if (result.data?.performance_metrics) {
           const perf = result.data.performance_metrics;
-          addLog(`📊 Performance: ${Math.round(perf.total_duration / 1000)}s total, timeout was ${Math.round(perf.timeout_used / 1000)}s`);
+          addLog(`📊 Performance: ${Math.round(perf.total_duration / 1000)}s total`);
         }
       } else {
         // Handle execution failure with potential retry logic

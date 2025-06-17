@@ -1,26 +1,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
-import { extractDebugInfo, logNetworkEvent, generateRequestId } from "../_shared/network-utils.ts"
-
-interface FlowConfig {
-  senders?: string
-  emailFilter?: string
-  driveFolder: string
-  fileTypes?: string[]
-  userId?: string
-  flowName?: string
-  maxEmails?: number
-  enableDebugMode?: boolean
-}
-
-interface RequestBody {
-  action: string
-  flowId?: string
-  userConfig?: FlowConfig
-  user_id?: string
-}
+import { extractDebugInfo, logNetworkEvent } from "../_shared/network-utils.ts"
+import { RequestBody } from "./types.ts"
+import { getUserEmail } from "./user-service.ts"
+import { callAppsScript } from "./apps-script-client.ts"
+import { buildAppsScriptPayload } from "./payload-builder.ts"
 
 serve(async (req) => {
   const debugInfo = extractDebugInfo(req);
@@ -54,9 +39,6 @@ serve(async (req) => {
         request_id: debugInfo.request_id
       }, 500);
     }
-
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Parse request body
     let originalPayload: RequestBody;
@@ -96,152 +78,53 @@ serve(async (req) => {
     // Get user email from Supabase profiles table
     let userEmail = null;
     if (originalPayload.user_id) {
-      try {
-        logNetworkEvent('FETCHING_USER_EMAIL', {
-          user_id: originalPayload.user_id,
-          request_id: debugInfo.request_id
-        });
-
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('id', originalPayload.user_id)
-          .single();
-
-        if (profileError) {
-          logNetworkEvent('USER_EMAIL_FETCH_ERROR', {
-            error: profileError.message,
-            user_id: originalPayload.user_id,
-            request_id: debugInfo.request_id
-          });
-        } else if (profile?.email) {
-          userEmail = profile.email;
-          logNetworkEvent('USER_EMAIL_RETRIEVED', {
-            user_id: originalPayload.user_id,
-            request_id: debugInfo.request_id
-          });
-        }
-      } catch (error) {
-        logNetworkEvent('USER_EMAIL_RETRIEVAL_ERROR', {
-          error: error.message,
-          user_id: originalPayload.user_id,
-          request_id: debugInfo.request_id
-        });
-      }
+      userEmail = await getUserEmail(
+        originalPayload.user_id,
+        supabaseUrl,
+        supabaseServiceKey,
+        debugInfo.request_id
+      );
     }
 
     // Create payload for Apps Script using shared secret authentication
-    const bodyForGas = {
-      auth_token: appsScriptSecret, // Simple shared secret authentication
-      action: 'process_gmail_flow',
-      userEmail: userEmail, // Pass user's email for personalized processing
-      userConfig: {
-        senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter,
-        driveFolder: originalPayload.userConfig?.driveFolder || 'Email Attachments',
-        fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
-        flowName: originalPayload.userConfig?.flowName || 'Default Flow',
-        maxEmails: 10,
-        enableDebugMode: true
-      },
-      debug_info: {
+    const appsScriptPayload = buildAppsScriptPayload(
+      originalPayload,
+      userEmail,
+      appsScriptSecret,
+      debugInfo.request_id
+    );
+
+    // Call Apps Script
+    try {
+      const appsScriptData = await callAppsScript(
+        appsScriptUrl,
+        appsScriptPayload,
+        debugInfo.request_id
+      );
+
+      const totalDuration = Date.now() - startTime;
+
+      // Return successful response
+      return createCorsResponse({
+        success: true,
+        message: `Flow processed successfully using shared secret authentication`,
         request_id: debugInfo.request_id,
-        has_user_email: !!userEmail,
         auth_method: 'shared-secret',
-        timestamp: new Date().toISOString()
-      }
-    };
-
-    logNetworkEvent('CALLING_APPS_SCRIPT', {
-      url: appsScriptUrl,
-      userEmail: userEmail,
-      senders: bodyForGas.userConfig.senders,
-      driveFolder: bodyForGas.userConfig.driveFolder,
-      authMethod: 'shared-secret',
-      request_id: debugInfo.request_id
-    });
-
-    // Make request to Apps Script
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-    let response;
-    try {
-      response = await fetch(appsScriptUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Request-ID': debugInfo.request_id
+        user_email: userEmail,
+        performance_metrics: {
+          total_duration: totalDuration
         },
-        body: JSON.stringify(bodyForGas),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      logNetworkEvent('FETCH_ERROR', { 
-        error: fetchError.message,
-        request_id: debugInfo.request_id
-      });
-      
-      if (fetchError.name === 'AbortError') {
-        return createCorsResponse({
-          error: 'Apps Script request timeout (60s)',
-          request_id: debugInfo.request_id
-        }, 504);
-      }
-      
-      throw fetchError;
-    }
+        apps_script_response: appsScriptData
+      }, 200);
 
-    const totalDuration = Date.now() - startTime;
-    logNetworkEvent('APPS_SCRIPT_RESPONSE', {
-      status: response.status,
-      request_id: debugInfo.request_id,
-      total_duration: totalDuration
-    });
-
-    if (!response.ok) {
-      const responseText = await response.text();
+    } catch (appsScriptError) {
+      const totalDuration = Date.now() - startTime;
       return createCorsResponse({
-        error: `Apps Script error (${response.status})`,
+        error: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration
       }, 502);
     }
-
-    // Parse Apps Script response
-    let appsScriptData
-    try {
-      const responseText = await response.text();
-      appsScriptData = JSON.parse(responseText);
-      
-      logNetworkEvent('SUCCESS', {
-        status: appsScriptData.status,
-        attachments: appsScriptData.data?.attachments || 0,
-        request_id: debugInfo.request_id,
-        total_duration: totalDuration
-      });
-    } catch (error) {
-      return createCorsResponse({
-        error: 'Apps Script returned invalid JSON',
-        details: error.message,
-        request_id: debugInfo.request_id,
-        total_duration: totalDuration
-      }, 502);
-    }
-
-    // Return successful response
-    return createCorsResponse({
-      success: true,
-      message: `Flow processed successfully using shared secret authentication`,
-      request_id: debugInfo.request_id,
-      auth_method: 'shared-secret',
-      user_email: userEmail,
-      performance_metrics: {
-        total_duration: totalDuration
-      },
-      apps_script_response: appsScriptData
-    }, 200);
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
