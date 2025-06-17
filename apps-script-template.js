@@ -1,117 +1,153 @@
-
 /**
  * Apps Script Web App Template for Gmail to Drive Flow
- * SHARED SECRET AUTHENTICATION VERSION WITH ENHANCED TESTING
+ * TWO-LAYER AUTHENTICATION VERSION (secret + payload structure)
+ * V.06 FRONTEND-COMPATIBLE
  */
 
 function doPost(e) {
-  const SCRIPT_SECRET = PropertiesService.getScriptProperties().getProperty('APPS_SCRIPT_SECRET');
+  const startTime = Date.now();
   
   try {
-    console.log('📨 Received POST request');
+    console.log('📨 Received POST request - V.06 Two-Layer Format');
     
     if (!e.postData || !e.postData.contents) {
       console.error('❌ No post data received');
-      return createErrorResponse('No request body received');
+      return createFrontendResponse('error', 'No request body received');
     }
     
-    const requestData = JSON.parse(e.postData.contents);
-    const receivedSecret = requestData.auth_token;
-    const userEmail = requestData.userEmail;
-    const userConfig = requestData.userConfig;
+    let requestData;
+    try {
+      requestData = JSON.parse(e.postData.contents);
+      console.log('📋 Raw request parsed:', {
+        hasSecret: !!requestData.secret,
+        hasPayload: !!requestData.payload,
+        topLevelKeys: Object.keys(requestData || {}),
+        payloadKeys: requestData.payload ? Object.keys(requestData.payload) : []
+      });
+    } catch (parseError) {
+      console.error('❌ JSON parsing failed:', parseError);
+      return createFrontendResponse('error', 'Invalid JSON in request body');
+    }
     
-    console.log('📋 Request parsed:', {
-      hasSecret: !!receivedSecret,
-      hasUserEmail: !!userEmail,
-      action: requestData.action,
-      flowName: userConfig?.flowName,
-      driveFolder: userConfig?.driveFolder,
-      senders: userConfig?.senders
+    // Validate two-layer structure
+    if (!requestData.secret) {
+      console.error('❌ Missing secret in top-level structure');
+      return createFrontendResponse('error', 'Authentication failed: Missing secret in top-level structure');
+    }
+    
+    if (!requestData.payload) {
+      console.error('❌ Missing payload in top-level structure');
+      return createFrontendResponse('error', 'Missing payload in top-level structure');
+    }
+    
+    // Extract authentication and payload layers
+    const receivedSecret = requestData.secret;
+    const payload = requestData.payload;
+    const SCRIPT_SECRET = PropertiesService.getScriptProperties().getProperty('APPS_SCRIPT_SECRET');
+    
+    console.log('🔐 Two-layer authentication check:', {
+      hasReceivedSecret: !!receivedSecret,
+      hasStoredSecret: !!SCRIPT_SECRET,
+      secretLengths: {
+        received: receivedSecret?.length || 0,
+        stored: SCRIPT_SECRET?.length || 0
+      },
+      payloadAction: payload?.action,
+      payloadUserConfig: !!payload?.userConfig
     });
     
     // Enhanced authentication checking
     if (!SCRIPT_SECRET) {
       console.error('❌ APPS_SCRIPT_SECRET not configured in Apps Script properties');
-      return createErrorResponse('Server configuration error: Missing secret. Please configure APPS_SCRIPT_SECRET in Apps Script Properties.');
-    }
-    
-    if (!receivedSecret) {
-      console.error('❌ No auth token provided in request');
-      return createErrorResponse('Authentication failed: No auth token provided');
+      return createFrontendResponse('error', 'Server configuration error: Missing secret. Please configure APPS_SCRIPT_SECRET in Apps Script Properties.');
     }
     
     if (receivedSecret !== SCRIPT_SECRET) {
-      console.error('❌ Authentication failed: Invalid secret');
-      console.log('🔍 Secret comparison:', {
+      console.error('❌ Authentication failed: Invalid secret in two-layer structure');
+      console.log('🔍 Secret comparison details:', {
         receivedLength: receivedSecret?.length || 0,
         expectedLength: SCRIPT_SECRET?.length || 0,
-        match: receivedSecret === SCRIPT_SECRET
+        match: receivedSecret === SCRIPT_SECRET,
+        receivedPreview: receivedSecret ? receivedSecret.substring(0, 10) + '...' : 'None',
+        expectedPreview: SCRIPT_SECRET ? SCRIPT_SECRET.substring(0, 10) + '...' : 'None'
       });
-      return createErrorResponse('Authentication failed: Invalid secret token');
+      return createFrontendResponse('error', 'Authentication failed: Invalid secret token');
     }
     
-    console.log('✅ Authentication successful with shared secret');
+    console.log('✅ Two-layer authentication successful');
     
-    // Handle different actions
-    if (requestData.action === 'process_gmail_flow') {
-      return processGmailFlowWithUserEmail(userConfig, userEmail);
-    } else if (requestData.action === 'health_check') {
-      return createSuccessResponse({
-        message: 'Apps Script is healthy and ready',
+    // Validate payload structure
+    if (!payload.action) {
+      console.error('❌ Missing action in payload');
+      return createFrontendResponse('error', 'Missing action in payload');
+    }
+    
+    console.log('📧 Processing payload with action:', {
+      action: payload.action,
+      hasUserConfig: !!payload.userConfig,
+      hasUserEmail: !!payload.userEmail,
+      hasDebugInfo: !!payload.debug_info,
+      userConfigKeys: payload.userConfig ? Object.keys(payload.userConfig) : []
+    });
+    
+    // Handle different actions from payload
+    if (payload.action === 'process_gmail_flow') {
+      return handleGmailFlowFrontendCompatible(payload, startTime);
+    } else if (payload.action === 'health_check') {
+      return createFrontendResponse('success', 'Apps Script is healthy and ready', {
+        version: 'V.06-FRONTEND-COMPATIBLE-TWO-LAYER',
         timestamp: new Date().toISOString(),
-        version: 'shared-secret-v2'
+        auth_method: 'two-layer-secret-payload',
+        processing_time: Date.now() - startTime
       });
     } else {
-      console.error('❌ Unknown action:', requestData.action);
-      return createErrorResponse('Unknown action: ' + requestData.action);
+      console.error('❌ Unknown action in payload:', payload.action);
+      return createFrontendResponse('error', 'Unknown action: ' + payload.action);
     }
     
   } catch (error) {
     console.error('❌ Error in doPost:', error);
-    return createErrorResponse('Internal server error: ' + error.toString());
+    return createFrontendResponse('error', 'Internal server error: ' + error.toString());
   }
 }
 
-function processGmailFlowWithUserEmail(userConfig, userEmail) {
+function handleGmailFlowFrontendCompatible(payload, startTime) {
   try {
-    console.log('📧 Processing Gmail flow with enhanced validation');
-    console.log('📧 User config:', {
-      senders: userConfig?.senders,
-      driveFolder: userConfig?.driveFolder,
-      flowName: userConfig?.flowName,
-      fileTypes: userConfig?.fileTypes,
-      maxEmails: userConfig?.maxEmails
+    console.log('📧 Processing Gmail flow with two-layer payload structure');
+    console.log('📧 Payload details:', {
+      userConfig: payload.userConfig,
+      userEmail: payload.userEmail,
+      debugInfo: payload.debug_info
     });
-    console.log('📧 User email:', userEmail);
     
-    // Enhanced validation
-    if (!userConfig) {
-      console.error('❌ No user config provided');
-      return createErrorResponse('User configuration is required');
+    // Enhanced validation for payload structure
+    if (!payload.userConfig) {
+      console.error('❌ No user config in payload');
+      return createFrontendResponse('error', 'User configuration is required in payload');
     }
     
-    if (!userConfig.driveFolder) {
-      console.error('❌ No drive folder specified');
-      return createErrorResponse('Drive folder is required');
+    if (!payload.userConfig.driveFolder) {
+      console.error('❌ No drive folder in payload userConfig');
+      return createFrontendResponse('error', 'Drive folder is required in payload userConfig');
     }
     
-    if (!userConfig.flowName) {
-      console.error('❌ No flow name specified');
-      return createErrorResponse('Flow name is required');
+    if (!payload.userConfig.flowName) {
+      console.error('❌ No flow name in payload userConfig');
+      return createFrontendResponse('error', 'Flow name is required in payload userConfig');
     }
     
-    // Build Gmail search query using the user's email and configuration
-    let searchQuery = buildSearchQuery(userConfig, userEmail);
+    // Build Gmail search query using payload data
+    let searchQuery = buildSearchQuery(payload.userConfig, payload.userEmail);
     
-    console.log('🔍 Gmail search query:', searchQuery);
+    console.log('🔍 Gmail search query from payload:', searchQuery);
     
     // Search for emails with enhanced error handling
     let threads;
     try {
-      threads = GmailApp.search(searchQuery, 0, userConfig.maxEmails || 10);
+      threads = GmailApp.search(searchQuery, 0, payload.userConfig.maxEmails || 10);
     } catch (gmailError) {
       console.error('❌ Gmail search failed:', gmailError);
-      return createErrorResponse('Gmail search failed: ' + gmailError.toString());
+      return createFrontendResponse('error', 'Gmail search failed: ' + gmailError.toString());
     }
     
     let processedCount = 0;
@@ -119,25 +155,26 @@ function processGmailFlowWithUserEmail(userConfig, userEmail) {
     let emailsFound = threads.length;
     let processedAttachments = [];
     
-    console.log(`📨 Found ${emailsFound} email threads`);
+    console.log(`📨 Found ${emailsFound} email threads from payload search`);
     
     if (emailsFound === 0) {
-      return createSuccessResponse({
+      return createFrontendResponse('success', 'No emails found matching the search criteria', {
         processedEmails: 0,
         savedAttachments: 0,
         emailsFound: 0,
         attachments: 0,
-        flowName: userConfig.flowName,
-        userEmail: userEmail,
+        flowName: payload.userConfig.flowName,
+        userEmail: payload.userEmail,
         searchQuery: searchQuery,
-        message: 'No emails found matching the search criteria',
         debugInfo: {
-          userEmail: userEmail,
+          userEmail: payload.userEmail,
           searchQuery: searchQuery,
           emailsFound: 0,
           processedEmails: 0,
-          savedAttachments: 0
-        }
+          savedAttachments: 0,
+          payloadProcessing: 'two-layer-format'
+        },
+        processing_time: Date.now() - startTime
       });
     }
     
@@ -154,11 +191,11 @@ function processGmailFlowWithUserEmail(userConfig, userEmail) {
             
             attachments.forEach((attachment, attachmentIndex) => {
               try {
-                if (shouldProcessFileType(attachment, userConfig.fileTypes)) {
+                if (shouldProcessFileType(attachment, payload.userConfig.fileTypes)) {
                   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                  const fileName = `${userConfig.flowName}_${timestamp}_${attachment.getName()}`;
+                  const fileName = `${payload.userConfig.flowName}_${timestamp}_${attachment.getName()}`;
                   
-                  const folder = getOrCreateFolder(userConfig.driveFolder);
+                  const folder = getOrCreateFolder(payload.userConfig.driveFolder);
                   const file = folder.createFile(attachment.copyBlob().setName(fileName));
                   
                   processedAttachments.push({
@@ -195,34 +232,37 @@ function processGmailFlowWithUserEmail(userConfig, userEmail) {
       savedAttachments: attachmentCount,
       emailsFound: emailsFound,
       attachments: attachmentCount,
-      flowName: userConfig.flowName,
-      userEmail: userEmail,
-      authMethod: 'shared-secret',
+      flowName: payload.userConfig.flowName,
+      userEmail: payload.userEmail,
+      authMethod: 'two-layer-secret-payload',
       searchQuery: searchQuery,
       processedAttachments: processedAttachments,
-      message: `Processed ${processedCount} emails and saved ${attachmentCount} attachments for ${userEmail}`,
       debugInfo: {
-        userEmail: userEmail,
+        userEmail: payload.userEmail,
         searchQuery: searchQuery,
         emailsFound: emailsFound,
         processedEmails: processedCount,
         savedAttachments: attachmentCount,
-        driveFolder: userConfig.driveFolder,
-        allowedFileTypes: userConfig.fileTypes
-      }
+        driveFolder: payload.userConfig.driveFolder,
+        allowedFileTypes: payload.userConfig.fileTypes,
+        payloadProcessing: 'two-layer-format',
+        requestId: payload.debug_info?.request_id || 'unknown'
+      },
+      processing_time: Date.now() - startTime
     };
     
-    console.log('✅ Gmail flow completed successfully:', {
+    console.log('✅ Gmail flow completed successfully with two-layer format:', {
       processedEmails: result.processedEmails,
       savedAttachments: result.savedAttachments,
-      emailsFound: result.emailsFound
+      emailsFound: result.emailsFound,
+      authMethod: result.authMethod
     });
     
-    return createSuccessResponse(result);
+    return createFrontendResponse('success', `Processed ${processedCount} emails and saved ${attachmentCount} attachments for ${payload.userEmail}`, result);
       
   } catch (error) {
-    console.error('❌ Error processing Gmail flow:', error);
-    return createErrorResponse('Failed to process Gmail flow: ' + error.toString());
+    console.error('❌ Error processing Gmail flow with two-layer payload:', error);
+    return createFrontendResponse('error', 'Failed to process Gmail flow: ' + error.toString());
   }
 }
 
@@ -315,6 +355,30 @@ function getOrCreateFolder(folderPath) {
   
   console.log('📁 Final folder ID:', currentFolder.getId());
   return currentFolder;
+}
+
+function createFrontendResponse(status, message, data = null) {
+  const response = {
+    status: status,
+    message: message,
+    timestamp: new Date().toISOString(),
+    version: 'V.06-FRONTEND-COMPATIBLE-TWO-LAYER'
+  };
+  
+  if (data) {
+    response.data = data;
+  }
+  
+  console.log('📤 Creating frontend response:', {
+    status: response.status,
+    hasData: !!data,
+    version: response.version,
+    messageLength: message?.length || 0
+  });
+  
+  return ContentService
+    .createTextOutput(JSON.stringify(response))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function createSuccessResponse(data) {

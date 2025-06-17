@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
 import { extractDebugInfo, logNetworkEvent } from "../_shared/network-utils.ts"
@@ -13,16 +12,17 @@ serve(async (req) => {
   const startTime = Date.now();
   logNetworkEvent('REQUEST_RECEIVED', debugInfo);
 
-  console.log('[EDGE FUNCTION] 🚀 Edge Function started with enhanced logging:', {
+  console.log('[EDGE FUNCTION] 🚀 Edge Function started with two-layer format support:', {
     method: req.method,
     url: req.url,
     debugInfo,
+    targetFormat: 'two-layer-secret-payload',
     timestamp: new Date().toISOString()
   });
 
   // Log all request headers for auth debugging
   const headers = Object.fromEntries(req.headers.entries());
-  console.log('[EDGE FUNCTION] 🔐 Request headers analysis:', {
+  console.log('[EDGE FUNCTION] 🔐 Request headers analysis for two-layer auth:', {
     hasAuthorization: !!headers.authorization,
     hasApikey: !!headers.apikey,
     hasClientInfo: !!headers['x-client-info'],
@@ -41,25 +41,27 @@ serve(async (req) => {
   try {
     logNetworkEvent('FUNCTION_START', { request_id: debugInfo.request_id });
 
-    // Enhanced auth header check
+    // Enhanced auth header check for two-layer format
     const authHeader = req.headers.get('authorization');
     const apiKeyHeader = req.headers.get('apikey');
     
-    console.log('[EDGE FUNCTION] 🔐 Auth context analysis:', {
+    console.log('[EDGE FUNCTION] 🔐 Two-layer auth context analysis:', {
       hasAuthHeader: !!authHeader,
       authHeaderType: authHeader ? authHeader.substring(0, 20) + '...' : 'None',
       hasApiKey: !!apiKeyHeader,
       apiKeyPresent: apiKeyHeader ? 'Present' : 'None',
       userAgent: req.headers.get('user-agent'),
+      note: 'Two-layer format uses secret in payload, not headers',
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
 
     if (!authHeader && !apiKeyHeader) {
-      console.error('[EDGE FUNCTION] 🔐 MISSING AUTHORIZATION ERROR:', {
+      console.error('[EDGE FUNCTION] 🔐 MISSING AUTHORIZATION ERROR (Two-layer format):', {
         error: 'No authorization header or API key found',
         availableHeaders: Object.keys(headers),
         expectedHeaders: ['authorization', 'apikey'],
+        note: 'Two-layer format still requires Supabase auth for user lookup',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -70,13 +72,15 @@ serve(async (req) => {
         debug_info: {
           available_headers: Object.keys(headers),
           expected_auth: 'Bearer token in Authorization header',
+          note: 'Required for user lookup even with two-layer Apps Script auth',
           request_id: debugInfo.request_id
         }
       }, 401);
     }
 
-    console.log('[EDGE FUNCTION] ✅ Authorization headers found:', {
+    console.log('[EDGE FUNCTION] ✅ Authorization headers found for two-layer format:', {
       authMethod: authHeader ? 'Bearer token' : 'API key',
+      note: 'This auth is for Supabase user lookup, Apps Script uses secret in payload',
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
@@ -87,12 +91,14 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-    console.log('[EDGE FUNCTION] 🔧 Environment variables check:', {
+    console.log('[EDGE FUNCTION] 🔧 Environment variables check for two-layer format:', {
       hasAppsScriptUrl: !!appsScriptUrl,
       hasAppsScriptSecret: !!appsScriptSecret,
       hasSupabaseUrl: !!supabaseUrl,
       hasSupabaseServiceKey: !!supabaseServiceKey,
       appsScriptUrlLength: appsScriptUrl?.length || 0,
+      secretLength: appsScriptSecret?.length || 0,
+      note: 'Apps Script secret will be used in two-layer payload',
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
@@ -133,10 +139,11 @@ serve(async (req) => {
         request_id: debugInfo.request_id 
       });
 
-      console.log('[EDGE FUNCTION] 📖 Request body received:', {
+      console.log('[EDGE FUNCTION] 📖 Request body received for two-layer transformation:', {
         bodyLength: bodyText.length,
         bodyPreview: bodyText.substring(0, 500),
         isEmpty: bodyText.trim().length === 0,
+        targetFormat: 'two-layer-secret-payload',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -150,12 +157,13 @@ serve(async (req) => {
 
       originalPayload = JSON.parse(bodyText);
       
-      console.log('[EDGE FUNCTION] 📋 Parsed request payload:', {
+      console.log('[EDGE FUNCTION] 📋 Parsed request payload for two-layer format:', {
         parsedPayload: JSON.stringify(originalPayload, null, 2),
         hasAction: !!originalPayload.action,
         action: originalPayload.action,
         hasUserId: !!originalPayload.user_id,
         hasUserConfig: !!originalPayload.userConfig,
+        willBecomePayloadLayer: 'This will become the inner payload in two-layer structure',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -202,10 +210,11 @@ serve(async (req) => {
     // Get user email from Supabase profiles table
     let userEmail = null;
     if (originalPayload.user_id) {
-      console.log('[EDGE FUNCTION] 📧 Fetching user email with auth context:', {
+      console.log('[EDGE FUNCTION] 📧 Fetching user email for two-layer format:', {
         user_id: originalPayload.user_id,
         hasAuthHeader: !!authHeader,
         supabaseAuth: 'Using service role key for profile lookup',
+        note: 'User email will be included in two-layer payload',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -236,56 +245,62 @@ serve(async (req) => {
         }, 400);
       }
 
-      console.log('[EDGE FUNCTION] ✅ User email retrieved successfully:', {
+      console.log('[EDGE FUNCTION] ✅ User email retrieved for two-layer payload:', {
         user_id: originalPayload.user_id,
         hasEmail: !!userEmail,
         authMethod: 'service-role-lookup',
+        willBeInPayloadLayer: true,
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
     }
 
-    // Create payload for Apps Script using shared secret authentication
-    console.log('[EDGE FUNCTION] 🔧 Building Apps Script payload...');
-    const appsScriptPayload = buildAppsScriptPayload(
+    // Create two-layer payload for Apps Script
+    console.log('[EDGE FUNCTION] 🔧 Building two-layer Apps Script payload...');
+    const twoLayerPayload = buildAppsScriptPayload(
       originalPayload,
       userEmail,
       appsScriptSecret,
       debugInfo.request_id
     );
 
-    console.log('[EDGE FUNCTION] 🚀 Calling Apps Script with auth details:', {
+    console.log('[EDGE FUNCTION] 🚀 Calling Apps Script with two-layer format:', {
       userEmail: userEmail,
-      flowName: appsScriptPayload.userConfig.flowName,
-      driveFolder: appsScriptPayload.userConfig.driveFolder,
-      authMethod: 'shared-secret',
-      hasSharedSecret: !!appsScriptSecret,
+      flowName: twoLayerPayload.payload?.userConfig?.flowName,
+      driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
+      authMethod: 'two-layer-secret-payload',
+      hasSecret: !!twoLayerPayload.secret,
+      hasPayload: !!twoLayerPayload.payload,
+      innerAction: twoLayerPayload.payload?.action,
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
 
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       userEmail: userEmail,
-      flowName: appsScriptPayload.userConfig.flowName,
-      driveFolder: appsScriptPayload.userConfig.driveFolder,
+      flowName: twoLayerPayload.payload?.userConfig?.flowName,
+      driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
+      format: 'two-layer-secret-payload',
       request_id: debugInfo.request_id
     });
 
-    // Call Apps Script with enhanced error handling
+    // Call Apps Script with two-layer format
     try {
       const appsScriptData = await callAppsScript(
         appsScriptUrl,
-        appsScriptPayload,
+        twoLayerPayload,
         debugInfo.request_id
       );
 
       const totalDuration = Date.now() - startTime;
 
-      console.log('[EDGE FUNCTION] ✅ Apps Script call successful:', {
+      console.log('[EDGE FUNCTION] ✅ Apps Script call successful with two-layer format:', {
         status: appsScriptData.status,
         attachments: appsScriptData.data?.attachments || 0,
         total_duration: totalDuration,
-        authMethod: 'shared-secret',
+        authMethod: appsScriptData.data?.authMethod || 'unknown',
+        version: appsScriptData.version,
+        processingTime: appsScriptData.processing_time,
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -294,10 +309,11 @@ serve(async (req) => {
         status: appsScriptData.status,
         attachments: appsScriptData.data?.attachments || 0,
         total_duration: totalDuration,
+        format: 'two-layer-secret-payload',
         request_id: debugInfo.request_id
       });
 
-      // Process the response using the new response processor
+      // Process the response using the two-layer format response processor
       const processedResponse = processAppsScriptResponse(
         appsScriptData,
         userEmail,
@@ -305,9 +321,11 @@ serve(async (req) => {
         totalDuration
       );
 
-      console.log('[EDGE FUNCTION] 📤 Returning processed response:', {
+      console.log('[EDGE FUNCTION] 📤 Returning processed two-layer response:', {
         responseType: processedResponse.success ? 'success' : 'error',
         hasAppsScriptResponse: !!processedResponse.apps_script_response,
+        authMethod: processedResponse.auth_method,
+        version: processedResponse.apps_script_response?.version,
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -317,18 +335,24 @@ serve(async (req) => {
     } catch (appsScriptError) {
       const totalDuration = Date.now() - startTime;
       
-      console.error('[EDGE FUNCTION] ❌ Apps Script call failed:', {
+      console.error('[EDGE FUNCTION] ❌ Apps Script call failed with two-layer format:', {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        authMethod: 'shared-secret',
+        authMethod: 'two-layer-secret-payload',
+        sentPayloadStructure: {
+          hasSecret: !!twoLayerPayload.secret,
+          hasPayload: !!twoLayerPayload.payload,
+          innerAction: twoLayerPayload.payload?.action
+        },
         timestamp: new Date().toISOString()
       });
       
       logNetworkEvent('APPS_SCRIPT_ERROR', {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
-        total_duration: totalDuration
+        total_duration: totalDuration,
+        format: 'two-layer-secret-payload'
       });
       
       return createCorsResponse({
@@ -340,7 +364,11 @@ serve(async (req) => {
           user_id: originalPayload.user_id,
           user_email: userEmail,
           apps_script_url: appsScriptUrl,
-          auth_method: 'shared-secret'
+          auth_method: 'two-layer-secret-payload',
+          sent_payload_structure: {
+            hasSecret: !!twoLayerPayload.secret,
+            hasPayload: !!twoLayerPayload.payload
+          }
         }
       }, 502);
     }
