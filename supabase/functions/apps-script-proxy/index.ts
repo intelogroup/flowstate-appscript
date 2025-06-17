@@ -12,6 +12,18 @@ serve(async (req) => {
   const startTime = Date.now();
   logNetworkEvent('REQUEST_RECEIVED', debugInfo);
 
+  // Log all request headers for auth debugging
+  const headers = Object.fromEntries(req.headers.entries());
+  console.log('[EDGE FUNCTION] 🔐 Request headers analysis:', {
+    hasAuthorization: !!headers.authorization,
+    hasApikey: !!headers.apikey,
+    hasClientInfo: !!headers['x-client-info'],
+    allHeaders: headers,
+    authHeaderValue: headers.authorization ? 'Bearer token present' : 'No Authorization header',
+    request_id: debugInfo.request_id,
+    timestamp: new Date().toISOString()
+  });
+
   if (req.method === 'OPTIONS') {
     logNetworkEvent('CORS_PREFLIGHT', { request_id: debugInfo.request_id });
     return handleCorsPrelight();
@@ -19,6 +31,46 @@ serve(async (req) => {
 
   try {
     logNetworkEvent('FUNCTION_START', { request_id: debugInfo.request_id });
+
+    // Enhanced auth header check
+    const authHeader = req.headers.get('authorization');
+    const apiKeyHeader = req.headers.get('apikey');
+    
+    console.log('[EDGE FUNCTION] 🔐 Auth context analysis:', {
+      hasAuthHeader: !!authHeader,
+      authHeaderType: authHeader ? authHeader.substring(0, 20) + '...' : 'None',
+      hasApiKey: !!apiKeyHeader,
+      apiKeyPresent: apiKeyHeader ? 'Present' : 'None',
+      userAgent: req.headers.get('user-agent'),
+      request_id: debugInfo.request_id,
+      timestamp: new Date().toISOString()
+    });
+
+    if (!authHeader && !apiKeyHeader) {
+      console.error('[EDGE FUNCTION] 🔐 MISSING AUTHORIZATION ERROR:', {
+        error: 'No authorization header or API key found',
+        availableHeaders: Object.keys(headers),
+        expectedHeaders: ['authorization', 'apikey'],
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
+      
+      return createCorsResponse({
+        error: 'Missing authorization header',
+        details: 'Request must include authorization header with Bearer token or apikey header',
+        debug_info: {
+          available_headers: Object.keys(headers),
+          expected_auth: 'Bearer token in Authorization header',
+          request_id: debugInfo.request_id
+        }
+      }, 401);
+    }
+
+    console.log('[EDGE FUNCTION] ✅ Authorization headers found:', {
+      authMethod: authHeader ? 'Bearer token' : 'API key',
+      request_id: debugInfo.request_id,
+      timestamp: new Date().toISOString()
+    });
 
     // Get environment variables with validation
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
@@ -108,6 +160,14 @@ serve(async (req) => {
     // Get user email from Supabase profiles table
     let userEmail = null;
     if (originalPayload.user_id) {
+      console.log('[EDGE FUNCTION] 📧 Fetching user email with auth context:', {
+        user_id: originalPayload.user_id,
+        hasAuthHeader: !!authHeader,
+        supabaseAuth: 'Using service role key for profile lookup',
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
+
       userEmail = await getUserEmail(
         originalPayload.user_id,
         supabaseUrl,
@@ -116,6 +176,13 @@ serve(async (req) => {
       );
 
       if (!userEmail) {
+        console.error('[EDGE FUNCTION] 📧 User email lookup failed:', {
+          user_id: originalPayload.user_id,
+          authPresent: !!authHeader,
+          request_id: debugInfo.request_id,
+          timestamp: new Date().toISOString()
+        });
+        
         logNetworkEvent('USER_EMAIL_NOT_FOUND', {
           user_id: originalPayload.user_id,
           request_id: debugInfo.request_id
@@ -126,6 +193,14 @@ serve(async (req) => {
           request_id: debugInfo.request_id
         }, 400);
       }
+
+      console.log('[EDGE FUNCTION] ✅ User email retrieved successfully:', {
+        user_id: originalPayload.user_id,
+        hasEmail: !!userEmail,
+        authMethod: 'service-role-lookup',
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
     }
 
     // Create payload for Apps Script using shared secret authentication
@@ -135,6 +210,16 @@ serve(async (req) => {
       appsScriptSecret,
       debugInfo.request_id
     );
+
+    console.log('[EDGE FUNCTION] 🚀 Calling Apps Script with auth details:', {
+      userEmail: userEmail,
+      flowName: appsScriptPayload.userConfig.flowName,
+      driveFolder: appsScriptPayload.userConfig.driveFolder,
+      authMethod: 'shared-secret',
+      hasSharedSecret: !!appsScriptSecret,
+      request_id: debugInfo.request_id,
+      timestamp: new Date().toISOString()
+    });
 
     logNetworkEvent('CALLING_APPS_SCRIPT', {
       userEmail: userEmail,
@@ -152,6 +237,15 @@ serve(async (req) => {
       );
 
       const totalDuration = Date.now() - startTime;
+
+      console.log('[EDGE FUNCTION] ✅ Apps Script call successful:', {
+        status: appsScriptData.status,
+        attachments: appsScriptData.data?.attachments || 0,
+        total_duration: totalDuration,
+        authMethod: 'shared-secret',
+        request_id: debugInfo.request_id,
+        timestamp: new Date().toISOString()
+      });
 
       logNetworkEvent('SUCCESS', {
         status: appsScriptData.status,
@@ -175,12 +269,22 @@ serve(async (req) => {
           user_id: originalPayload.user_id,
           user_email: userEmail,
           flow_name: originalPayload.userConfig?.flowName,
-          drive_folder: originalPayload.userConfig?.driveFolder
+          drive_folder: originalPayload.userConfig?.driveFolder,
+          auth_headers_received: !!authHeader
         }
       }, 200);
 
     } catch (appsScriptError) {
       const totalDuration = Date.now() - startTime;
+      
+      console.error('[EDGE FUNCTION] ❌ Apps Script call failed:', {
+        error: appsScriptError.message,
+        request_id: debugInfo.request_id,
+        total_duration: totalDuration,
+        authMethod: 'shared-secret',
+        timestamp: new Date().toISOString()
+      });
+      
       logNetworkEvent('APPS_SCRIPT_ERROR', {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
@@ -195,13 +299,23 @@ serve(async (req) => {
         debug_info: {
           user_id: originalPayload.user_id,
           user_email: userEmail,
-          apps_script_url: appsScriptUrl
+          apps_script_url: appsScriptUrl,
+          auth_method: 'shared-secret'
         }
       }, 502);
     }
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
+    
+    console.error('[EDGE FUNCTION] 💥 Edge Function internal error:', {
+      error: error.message,
+      request_id: debugInfo.request_id,
+      total_duration: totalDuration,
+      authRelated: error.message.includes('authorization') || error.message.includes('auth'),
+      timestamp: new Date().toISOString()
+    });
+    
     logNetworkEvent('EDGE_FUNCTION_ERROR', { 
       error: error.message,
       request_id: debugInfo.request_id,

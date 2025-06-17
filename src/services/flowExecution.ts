@@ -1,4 +1,3 @@
-
 import { FlowConfig, FlowExecutionResult } from './types/flowTypes';
 
 export class FlowExecutionService {
@@ -17,13 +16,22 @@ export class FlowExecutionService {
         flowName: userConfig.flowName,
         driveFolder: userConfig.driveFolder,
         senders: userConfig.senders,
-        edgeFunctionUrl: this.EDGE_FUNCTION_URL
+        edgeFunctionUrl: this.EDGE_FUNCTION_URL,
+        timestamp: new Date().toISOString()
       });
       
       // Validate required configuration
       this.validateConfig(userConfig);
 
       const payload = this.buildPayload(flowId, userConfig);
+
+      console.log('[FLOW EXECUTION] 🔐 Auth context before request:', {
+        hasUserId: !!userConfig.userId,
+        userId: userConfig.userId,
+        authMethod: 'supabase-client-auth',
+        requestWillIncludeAuth: 'Supabase client should handle auth headers automatically',
+        timestamp: new Date().toISOString()
+      });
 
       console.log('[FLOW EXECUTION] 📤 Sending request to edge function:', {
         url: this.EDGE_FUNCTION_URL,
@@ -34,7 +42,17 @@ export class FlowExecutionService {
         payloadDriveFolder: payload.userConfig.driveFolder,
         payloadSenders: payload.userConfig.senders,
         requestId: payload.debug_info.request_id,
-        fullPayload: payload
+        authExpectation: 'Edge function should receive Supabase auth context',
+        timestamp: new Date().toISOString()
+      });
+
+      console.log('[FLOW EXECUTION] 🌐 Making fetch request with headers check:', {
+        url: this.EDGE_FUNCTION_URL,
+        method: 'POST',
+        hasContentType: true,
+        bodySize: JSON.stringify(payload).length,
+        expectedAuthHandling: 'Browser should include auth cookies/headers automatically',
+        timestamp: new Date().toISOString()
       });
 
       const response = await fetch(this.EDGE_FUNCTION_URL, {
@@ -49,17 +67,51 @@ export class FlowExecutionService {
         status: response.status,
         statusText: response.statusText,
         ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries())
+        headers: Object.fromEntries(response.headers.entries()),
+        authErrorCheck: response.status === 401 ? 'AUTHORIZATION ERROR DETECTED' : 'No auth error',
+        timestamp: new Date().toISOString()
       });
 
       if (!response.ok) {
         let errorText;
         try {
           errorText = await response.text();
-          console.error('[FLOW EXECUTION] ❌ Error response body:', errorText);
+          console.error('[FLOW EXECUTION] ❌ Error response body:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorText,
+            isAuthError: response.status === 401,
+            timestamp: new Date().toISOString()
+          });
         } catch (textError) {
-          console.error('[FLOW EXECUTION] ❌ Could not read error response body:', textError);
+          console.error('[FLOW EXECUTION] ❌ Could not read error response body:', {
+            textError: textError.message,
+            originalStatus: response.status,
+            timestamp: new Date().toISOString()
+          });
           errorText = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        
+        if (response.status === 401) {
+          console.error('[FLOW EXECUTION] 🔐 CRITICAL: 401 UNAUTHORIZED ERROR:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorText,
+            flowId,
+            userId: userConfig.userId,
+            possibleCauses: [
+              'Supabase auth token missing',
+              'Edge function not receiving auth context',
+              'User session expired',
+              'Auth headers not being passed'
+            ],
+            debugSteps: [
+              'Check browser network tab for Authorization header',
+              'Verify Supabase client auth state',
+              'Check edge function auth handling'
+            ],
+            timestamp: new Date().toISOString()
+          });
         }
         
         console.error('[FLOW EXECUTION] ❌ HTTP error details:', {
@@ -67,7 +119,8 @@ export class FlowExecutionService {
           statusText: response.statusText,
           errorText,
           flowId,
-          userId: userConfig.userId
+          userId: userConfig.userId,
+          timestamp: new Date().toISOString()
         });
         
         throw new Error(`HTTP ${response.status}: ${errorText}`);
@@ -76,12 +129,25 @@ export class FlowExecutionService {
       let result;
       try {
         const responseText = await response.text();
-        console.log('[FLOW EXECUTION] 📋 Raw response text:', responseText);
+        console.log('[FLOW EXECUTION] 📋 Raw response text:', {
+          responseLength: responseText.length,
+          responsePreview: responseText.substring(0, 200),
+          timestamp: new Date().toISOString()
+        });
         
         result = JSON.parse(responseText);
-        console.log('[FLOW EXECUTION] 📊 Parsed response:', result);
+        console.log('[FLOW EXECUTION] 📊 Parsed response:', {
+          hasResult: !!result,
+          resultSuccess: result?.success,
+          hasError: !!result?.error,
+          authMethod: result?.auth_method,
+          timestamp: new Date().toISOString()
+        });
       } catch (parseError) {
-        console.error('[FLOW EXECUTION] ❌ Failed to parse response as JSON:', parseError);
+        console.error('[FLOW EXECUTION] ❌ Failed to parse response as JSON:', {
+          parseError: parseError instanceof Error ? parseError.message : String(parseError),
+          timestamp: new Date().toISOString()
+        });
         throw new Error('Invalid JSON response from server');
       }
 
@@ -89,18 +155,37 @@ export class FlowExecutionService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      
       console.error('[FLOW EXECUTION] 💥 Flow execution failed:', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMsg,
         errorType: error instanceof Error ? error.constructor.name : typeof error,
         stack: error instanceof Error ? error.stack : 'No stack trace',
         flowId,
         userId: userConfig.userId,
-        duration: `${duration}ms`
+        duration: `${duration}ms`,
+        authRelated: errorMsg.includes('authorization') || errorMsg.includes('401') || errorMsg.includes('auth'),
+        timestamp: new Date().toISOString()
       });
+      
+      if (errorMsg.includes('authorization') || errorMsg.includes('401') || errorMsg.includes('Missing authorization header')) {
+        console.error('[FLOW EXECUTION] 🔐 AUTHORIZATION FAILURE ANALYSIS:', {
+          errorMessage: errorMsg,
+          flowId,
+          userId: userConfig.userId,
+          likelySource: 'Edge function or Apps Script authentication',
+          nextSteps: [
+            'Check Supabase RLS policies',
+            'Verify edge function auth handling',
+            'Check Apps Script shared secret configuration'
+          ],
+          timestamp: new Date().toISOString()
+        });
+      }
       
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
+        error: errorMsg
       };
     }
   }
