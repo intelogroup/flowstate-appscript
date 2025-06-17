@@ -17,9 +17,12 @@ export const useAuthStateListener = ({
   setLoading
 }: UseAuthStateListenerProps) => {
   const mountedRef = useRef(true);
-  const backgroundTokenService = useRef<{ saveTokens: (session: Session) => void; deleteTokens: (userId: string) => void }>();
+  const backgroundTokenService = useRef<{ 
+    saveTokens: (session: Session) => void; 
+    deleteTokens: (userId: string) => void;
+  }>();
 
-  // Initialize background token service
+  // Initialize background token service with enhanced error handling
   useEffect(() => {
     backgroundTokenService.current = {
       saveTokens: (session: Session) => {
@@ -27,10 +30,11 @@ export const useAuthStateListener = ({
         setTimeout(async () => {
           try {
             const { AuthTokenService } = await import('@/services/authTokenService');
-            await AuthTokenService.saveTokens(session);
+            await AuthTokenService.saveTokensBackground(session);
             console.log('[AUTH_LISTENER] Background: Tokens saved successfully');
           } catch (error) {
-            console.error('[AUTH_LISTENER] Background: Failed to save tokens:', error);
+            // Error is already handled in saveTokensBackground, just log for debugging
+            console.error('[AUTH_LISTENER] Background: Token save wrapper error:', error);
           }
         }, 0);
       },
@@ -42,7 +46,7 @@ export const useAuthStateListener = ({
             await AuthTokenService.deleteTokens(userId);
             console.log('[AUTH_LISTENER] Background: Tokens deleted successfully');
           } catch (error) {
-            console.error('[AUTH_LISTENER] Background: Failed to delete tokens:', error);
+            console.error('[AUTH_LISTENER] Background: Failed to delete tokens (non-critical):', error);
           }
         }, 0);
       }
@@ -96,12 +100,12 @@ export const useAuthStateListener = ({
         });
         
         try {
-          // Always update state synchronously
+          // Always update state synchronously first
           setSession(session);
           setUser(session?.user ?? null);
           setAuthError(null);
           
-          // Handle background token operations based on event
+          // Handle background token operations based on event - completely isolated
           if (event === 'SIGNED_IN' && session) {
             console.log('[AUTH_LISTENER] User signed in, scheduling background token save');
             backgroundTokenService.current?.saveTokens(session);

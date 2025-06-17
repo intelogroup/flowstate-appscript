@@ -38,14 +38,14 @@ export const useTokenManagement = ({
 
       console.log('[TOKEN_MANAGEMENT] Token refresh successful');
       
-      // Save refreshed tokens in background (don't block the main flow)
+      // Save refreshed tokens in background (non-blocking)
       setTimeout(async () => {
         try {
           const { AuthTokenService } = await import('@/services/authTokenService');
-          await AuthTokenService.saveTokens(data.session);
+          await AuthTokenService.saveTokensBackground(data.session);
           console.log('[TOKEN_MANAGEMENT] Background: Refreshed tokens saved');
         } catch (saveError) {
-          console.error('[TOKEN_MANAGEMENT] Background: Failed to save refreshed tokens:', saveError);
+          console.error('[TOKEN_MANAGEMENT] Background: Failed to save refreshed tokens (non-critical):', saveError);
         }
       }, 0);
       
