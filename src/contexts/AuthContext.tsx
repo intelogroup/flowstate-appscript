@@ -1,21 +1,12 @@
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-
-interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  loading: boolean;
-  isGoogleConnected: boolean;
-  authError: string | null;
-  signOut: () => Promise<void>;
-  refreshSession: () => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  isTokenValid: () => boolean;
-  forceTokenRefresh: () => Promise<boolean>;
-  getGoogleOAuthToken: () => string | null;
-}
+import { AuthContextType } from './auth/types';
+import { useTokenValidation } from './auth/useTokenValidation';
+import { useTokenRefresh } from './auth/useTokenRefresh';
+import { useGoogleConnection } from './auth/useGoogleConnection';
+import { useAuthActions } from './auth/useAuthActions';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -33,200 +24,16 @@ export const AuthProvider = React.memo(({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Enhanced token validation with detailed logging
-  const isTokenValid = useCallback(() => {
-    if (!session?.expires_at) {
-      console.log('[AUTH] No session or expiration time found');
-      return false;
-    }
-    
-    const currentTime = Date.now() / 1000;
-    const expiresAt = session.expires_at;
-    const timeUntilExpiry = expiresAt - currentTime;
-    const isValid = timeUntilExpiry > 300; // 5 minute buffer
-    
-    console.log('[AUTH] Token validity check:', {
-      expiresAt: new Date(expiresAt * 1000).toISOString(),
-      currentTime: new Date(currentTime * 1000).toISOString(),
-      timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60),
-      isValid,
-      hasProviderToken: !!session.provider_token,
-      hasAccessToken: !!session.access_token
-    });
-    
-    return isValid;
-  }, [session]);
-
-  // Get the best available Google OAuth token
-  const getGoogleOAuthToken = useCallback((): string | null => {
-    if (!session) {
-      console.log('[AUTH] No session available for token extraction');
-      return null;
-    }
-
-    // Prefer provider_token (original Google OAuth token) but fall back to access_token
-    const token = session.provider_token || session.access_token;
-    
-    console.log('[AUTH] Token extraction:', {
-      hasProviderToken: !!session.provider_token,
-      hasAccessToken: !!session.access_token,
-      usingToken: session.provider_token ? 'provider_token' : 'access_token',
-      tokenLength: token?.length || 0
-    });
-
-    return token || null;
-  }, [session]);
-
-  // Force token refresh with enhanced error handling
-  const forceTokenRefresh = useCallback(async (): Promise<boolean> => {
-    try {
-      console.log('[AUTH] Force refreshing session...');
-      setAuthError(null);
-      
-      const { data, error } = await supabase.auth.refreshSession();
-      
-      if (error) {
-        console.error('[AUTH] Force refresh failed:', error);
-        setAuthError(`Token refresh failed: ${error.message}`);
-        return false;
-      }
-      
-      if (data.session) {
-        console.log('[AUTH] Force refresh successful');
-        console.log('[AUTH] New session tokens:', {
-          hasAccessToken: !!data.session.access_token,
-          hasProviderToken: !!data.session.provider_token,
-          hasRefreshToken: !!data.session.refresh_token,
-          expiresAt: new Date((data.session.expires_at || 0) * 1000).toISOString(),
-          tokenLengths: {
-            access: data.session.access_token?.length || 0,
-            provider: data.session.provider_token?.length || 0,
-            refresh: data.session.refresh_token?.length || 0
-          }
-        });
-        
-        setSession(data.session);
-        setUser(data.session.user);
-        setAuthError(null);
-        return true;
-      } else {
-        console.error('[AUTH] Force refresh returned no session');
-        setAuthError('Token refresh failed - no session returned');
-        return false;
-      }
-    } catch (error) {
-      console.error('[AUTH] Force refresh error:', error);
-      setAuthError('Token refresh failed - please sign in again');
-      return false;
-    }
-  }, []);
-
-  // Enhanced Google connection check with detailed logging
-  const isGoogleConnected = useMemo(() => {
-    if (!session || !session.user) {
-      console.log('[AUTH] No session or user available');
-      return false;
-    }
-    
-    const hasGoogleProvider = session.user.app_metadata?.provider === 'google';
-    const hasProviderToken = !!session.provider_token;
-    const hasAccessToken = !!session.access_token;
-    const tokenIsValid = isTokenValid();
-    
-    console.log('[AUTH] Google connection detailed check:', {
-      hasGoogleProvider,
-      hasProviderToken,
-      hasAccessToken,
-      tokenIsValid,
-      provider: session.user.app_metadata?.provider,
-      providerTokenLength: session.provider_token?.length || 0,
-      accessTokenLength: session.access_token?.length || 0,
-      sessionKeys: Object.keys(session),
-      // Log first 20 chars of tokens for debugging (safe)
-      providerTokenStart: session.provider_token?.substring(0, 20) || 'none',
-      accessTokenStart: session.access_token?.substring(0, 20) || 'none'
-    });
-    
-    // For Google OAuth, we need provider AND at least one valid token AND valid expiration
-    const isConnected = hasGoogleProvider && (hasProviderToken || hasAccessToken) && tokenIsValid;
-    
-    if (!isConnected && hasGoogleProvider) {
-      if (!tokenIsValid) {
-        console.warn('[AUTH] Google provider detected but token expired');
-        setAuthError('Google authentication expired - tokens need refresh');
-      } else if (!hasProviderToken && !hasAccessToken) {
-        console.warn('[AUTH] Google provider detected but missing all OAuth tokens');
-        setAuthError('Google authentication incomplete - missing OAuth tokens');
-      }
-    }
-    
-    return isConnected;
-  }, [session, isTokenValid]);
-
-  const signInWithGoogle = useCallback(async () => {
-    try {
-      setAuthError(null);
-      setLoading(true);
-      
-      console.log('[AUTH] Starting Google OAuth sign-in with enhanced scopes...');
-      
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/app`,
-          scopes: [
-            'https://www.googleapis.com/auth/gmail.readonly',
-            'https://www.googleapis.com/auth/drive.file',
-            'openid',
-            'email',
-            'profile'
-          ].join(' '),
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent'
-          }
-        }
-      });
-
-      if (error) {
-        console.error('[AUTH] Google OAuth error:', error);
-        setAuthError(`Google sign-in failed: ${error.message}`);
-      } else {
-        console.log('[AUTH] Google OAuth initiated successfully');
-      }
-    } catch (error) {
-      console.error('[AUTH] Unexpected error during Google sign-in:', error);
-      setAuthError('Failed to sign in with Google');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const refreshSession = useCallback(async () => {
-    try {
-      console.log('[AUTH] Manual session refresh requested...');
-      const success = await forceTokenRefresh();
-      
-      if (!success) {
-        console.log('[AUTH] Manual refresh failed, suggesting re-authentication');
-      }
-    } catch (error) {
-      console.error('[AUTH] Manual refresh error:', error);
-      setAuthError('Session refresh failed. Please sign in again.');
-    }
-  }, [forceTokenRefresh]);
-
-  const signOut = useCallback(async () => {
-    console.log('[AUTH] Signing out user...');
-    try {
-      setAuthError(null);
-      await supabase.auth.signOut();
-      setUser(null);
-      setSession(null);
-    } catch (error) {
-      console.error('[AUTH] Error during sign out:', error);
-    }
-  }, []);
+  const { isTokenValid, getGoogleOAuthToken } = useTokenValidation(session);
+  const { forceTokenRefresh } = useTokenRefresh(setSession, setUser, setAuthError);
+  const { isGoogleConnected } = useGoogleConnection(session, isTokenValid, setAuthError);
+  const { signInWithGoogle, refreshSession, signOut } = useAuthActions(
+    setAuthError,
+    setLoading,
+    setSession,
+    setUser,
+    forceTokenRefresh
+  );
 
   useEffect(() => {
     let mounted = true;
