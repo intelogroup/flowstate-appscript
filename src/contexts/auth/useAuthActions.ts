@@ -8,7 +8,7 @@ export const useAuthActions = (
   setLoading: (loading: boolean) => void,
   setSession: (session: Session | null) => void,
   setUser: (user: User | null) => void,
-  forceTokenRefresh: () => Promise<boolean>
+  forceTokenRefresh: () => Promise<Session | null>
 ) => {
   const signInWithGoogle = useCallback(async () => {
     try {
@@ -52,9 +52,9 @@ export const useAuthActions = (
   const refreshSession = useCallback(async () => {
     try {
       console.log('[AUTH] Manual session refresh requested...');
-      const success = await forceTokenRefresh();
+      const session = await forceTokenRefresh();
       
-      if (!success) {
+      if (!session) {
         console.log('[AUTH] Manual refresh failed, suggesting re-authentication');
       }
     } catch (error) {
