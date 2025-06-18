@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,13 +55,10 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
     setFormError(null);
 
     try {
-      // Convert senders to email filter format for backend compatibility
-      const emailFilter = `from:(${flowData.senders}) has:attachment`;
-      
+      // Send the raw senders data - let Apps Script format the Gmail query
       const submissionData = {
         ...flowData,
-        emailFilter, // Backend expects emailFilter
-        senders: flowData.senders // Keep original senders for display
+        senders: flowData.senders.trim() // Just pass the raw email addresses
       };
 
       await onSubmit(submissionData);
@@ -130,14 +126,14 @@ const FlowCreationForm = React.memo(({ onSubmit }: FlowCreationFormProps) => {
         </Label>
         <Input
           id="senders"
-          placeholder="e.g., invoices@company.com or invoices@company.com, billing@supplier.com"
+          placeholder="e.g., jayveedz19@gmail.com or invoices@company.com, billing@supplier.com"
           value={flowData.senders}
           onChange={(e) => updateFlowData('senders', e.target.value)}
           className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           disabled={isLoading}
         />
         <p className="text-xs text-gray-500">
-          Enter one or multiple email addresses separated by commas. We'll automatically look for emails with attachments.
+          Enter one or multiple email addresses separated by commas. We'll automatically search for emails with attachments from these senders.
         </p>
       </div>
 
