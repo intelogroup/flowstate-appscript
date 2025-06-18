@@ -1,15 +1,15 @@
-
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFlowManagement } from '@/hooks/useFlowManagement';
 import { useFlowExecutor } from '@/hooks/flow-execution/useFlowExecutor';
 import { useFlowLogs } from '@/hooks/useFlowLogs';
+import { useWebhookUpdates } from '@/hooks/useWebhookUpdates';
 import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import FlowsTabContent from '@/components/flow/FlowsTabContent';
 import FlowFormCard from '@/components/app/FlowFormCard';
+import FlowProgressModal from '@/components/flow/FlowProgressModal';
 import type { UserFlow } from '@/hooks/flow-execution/types';
 
 const FlowManager = () => {
@@ -18,8 +18,14 @@ const FlowManager = () => {
   const { addLog } = useFlowLogs();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('flows');
+  const [progressModal, setProgressModal] = useState<{ isOpen: boolean; flowName: string; requestId: string | null }>({
+    isOpen: false,
+    flowName: '',
+    requestId: null
+  });
 
   const { runningFlows, executeFlow } = useFlowExecutor({ addLog });
+  const { subscribeToFlow, getFlowProgress, clearFlowProgress } = useWebhookUpdates();
 
   const handleCreateFlow = async (flowData: any) => {
     try {
@@ -40,7 +46,7 @@ const FlowManager = () => {
   };
 
   const handleExecuteFlow = async (flowId: string) => {
-    console.log('[FLOW MANAGER] 🎯 Flow execution requested:', {
+    console.log('[FLOW MANAGER] 🎯 Flow execution requested with webhook integration:', {
       flowId,
       userId: user?.id,
       isGoogleConnected,
@@ -77,14 +83,6 @@ const FlowManager = () => {
       return;
     }
 
-    console.log('[FLOW MANAGER] ✅ Flow found, preparing execution:', {
-      flowId: flow.id,
-      flowName: flow.flow_name,
-      emailFilter: flow.email_filter,
-      driveFolder: flow.drive_folder,
-      userId: flow.user_id
-    });
-
     const userFlow: UserFlow = {
       id: flow.id,
       flow_name: flow.flow_name,
@@ -100,22 +98,30 @@ const FlowManager = () => {
       google_refresh_token: flow.google_refresh_token
     };
 
-    console.log('[FLOW MANAGER] 🚀 Starting flow execution with UserFlow object:', userFlow);
+    // Show progress modal and subscribe to webhook updates
+    const requestId = `flow-${flowId}-${Date.now()}`;
+    setProgressModal({
+      isOpen: true,
+      flowName: flow.flow_name,
+      requestId
+    });
+
+    const unsubscribe = subscribeToFlow(requestId);
 
     toast({
       title: "Flow Started",
-      description: `"${flow.flow_name}" is now processing...`,
+      description: `"${flow.flow_name}" is now processing with real-time updates...`,
     });
 
     try {
-      console.log('[FLOW MANAGER] 📞 Calling executeFlow...');
+      console.log('[FLOW MANAGER] 🚀 Starting flow execution with webhook integration...');
       const result = await executeFlow(userFlow);
       
-      console.log('[FLOW MANAGER] 📥 Flow execution completed:', {
+      console.log('[FLOW MANAGER] 📥 Flow execution completed with webhook integration:', {
         success: result?.success,
         hasData: !!result?.data,
         hasError: !!result?.error,
-        result
+        webhookEnabled: true
       });
       
       if (result?.success) {
@@ -147,11 +153,10 @@ const FlowManager = () => {
         });
       }
     } catch (error) {
-      console.error('[FLOW MANAGER] 💥 Flow execution exception:', {
+      console.error('[FLOW MANAGER] 💥 Flow execution exception with webhook integration:', {
         flowName: flow.flow_name,
         error: error instanceof Error ? error.message : String(error),
-        errorType: error instanceof Error ? error.constructor.name : typeof error,
-        stack: error instanceof Error ? error.stack : 'No stack trace'
+        webhookEnabled: true
       });
       
       toast({
@@ -159,6 +164,15 @@ const FlowManager = () => {
         description: error instanceof Error ? error.message : 'An unexpected error occurred',
         variant: "destructive",
       });
+    } finally {
+      unsubscribe();
+      // Keep modal open for a bit to show final results
+      setTimeout(() => {
+        setProgressModal(prev => ({ ...prev, isOpen: false }));
+        if (requestId) {
+          clearFlowProgress(requestId);
+        }
+      }, 3000);
     }
   };
 
@@ -178,6 +192,15 @@ const FlowManager = () => {
       });
     }
   };
+
+  const handleCloseProgressModal = () => {
+    setProgressModal(prev => ({ ...prev, isOpen: false }));
+    if (progressModal.requestId) {
+      clearFlowProgress(progressModal.requestId);
+    }
+  };
+
+  const currentProgress = progressModal.requestId ? getFlowProgress(progressModal.requestId) : null;
 
   return (
     <div className="space-y-6">
@@ -216,6 +239,14 @@ const FlowManager = () => {
           <FlowFormCard onFlowCreate={handleCreateFlow} />
         </TabsContent>
       </Tabs>
+
+      {/* Real-time Progress Modal */}
+      <FlowProgressModal
+        isOpen={progressModal.isOpen}
+        onClose={handleCloseProgressModal}
+        flowName={progressModal.flowName}
+        progress={currentProgress}
+      />
     </div>
   );
 };

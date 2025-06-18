@@ -1,46 +1,249 @@
 /**
  * Apps Script Web App Template for Gmail to Drive Flow
- * PRODUCTION VERSION WITH HARDENING PATTERNS
- * V.06 MODULAR ARCHITECTURE
+ * PRODUCTION VERSION WITH HARDENING PATTERNS AND WEBHOOK NOTIFICATIONS
+ * V.06 MODULAR ARCHITECTURE WITH REAL-TIME UPDATES
  */
 
 // Import all modules (in Apps Script, these would be separate .gs files)
 // For this template, we'll include them inline but organized
 
 /**
- * Configuration Module
- * Centralized configuration management for the Gmail processing system
+ * WebhookNotifier Module - Real-time Status Updates
  */
+const WebhookNotifier = {
+  DEFAULT_TIMEOUT: 5000,
+  MAX_RETRIES: 2,
+  
+  sendStatusUpdate: function(status, message, data, webhookUrl, requestId, userContext) {
+    try {
+      if (!webhookUrl || !webhookUrl.trim()) {
+        return { success: true, skipped: true, reason: 'No webhook URL provided' };
+      }
+      
+      console.log(`📡 [WEBHOOK] Sending status update: ${status} - ${message}`);
+      
+      const statusUpdate = {
+        type: 'status_update',
+        status: status,
+        message: message,
+        timestamp: new Date().toISOString(),
+        requestId: requestId,
+        authenticatedUser: userContext ? userContext.email : null,
+        version: 'V.06-MODULAR-WEBHOOK',
+        data: data || {}
+      };
+      
+      const result = this.makeWebhookCall(webhookUrl, statusUpdate);
+      console.log(`📡 [WEBHOOK] Status update result:`, { status: status, success: result.success });
+      return result;
+      
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send status update:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  sendProgressUpdate: function(current, total, message, webhookUrl, requestId, userContext, additionalData) {
+    try {
+      const percentage = Math.round((current / total) * 100);
+      const progressData = {
+        progress: { current: current, total: total, percentage: percentage, stage: message },
+        ...additionalData
+      };
+      
+      return this.sendStatusUpdate('processing', 
+        `${message} (${current}/${total} - ${percentage}%)`, 
+        progressData, webhookUrl, requestId, userContext);
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send progress update:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  sendFlowStarted: function(webhookUrl, requestId, userContext, config) {
+    try {
+      const startedData = {
+        flow: {
+          name: config.flowName || 'Gmail Processing Flow',
+          authenticatedUser: userContext.email,
+          searchFilter: config.senders,
+          targetFolder: config.driveFolder,
+          maxEmails: config.maxEmails,
+          fileTypes: config.fileTypes
+        }
+      };
+      
+      return this.sendStatusUpdate('started', 
+        `Flow started for ${userContext.email}`, 
+        startedData, webhookUrl, requestId, userContext);
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send flow started:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  sendSearchCompleted: function(emailsFound, webhookUrl, requestId, userContext, searchQuery) {
+    try {
+      const searchData = {
+        search: {
+          query: searchQuery,
+          emailsFound: emailsFound,
+          nextStep: emailsFound > 0 ? 'Processing attachments' : 'Completed - no emails found'
+        }
+      };
+      
+      const message = emailsFound > 0 ? 
+        `Found ${emailsFound} emails, processing attachments...` : 
+        `No emails found matching search criteria`;
+      
+      return this.sendStatusUpdate('processing', message, searchData, webhookUrl, requestId, userContext);
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send search completed:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  sendAttachmentProcessed: function(fileName, fileSize, webhookUrl, requestId, userContext, totalProcessed, totalFound) {
+    try {
+      const attachmentData = {
+        attachment: {
+          fileName: fileName,
+          fileSize: this.formatFileSize(fileSize),
+          totalProcessed: totalProcessed,
+          totalFound: totalFound
+        }
+      };
+      
+      return this.sendProgressUpdate(totalProcessed, totalFound, 
+        `Processed attachment: ${fileName}`, 
+        webhookUrl, requestId, userContext, attachmentData);
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send attachment processed:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  sendFlowCompleted: function(results, webhookUrl, requestId, userContext) {
+    try {
+      const completedData = {
+        results: {
+          emailsFound: results.emailsFound,
+          emailsProcessed: results.processedEmails,
+          attachmentsSaved: results.savedAttachments,
+          processingTime: results.processing_time + 'ms'
+        },
+        files: results.processedAttachments || []
+      };
+      
+      const message = `Flow completed: ${results.savedAttachments} attachments saved`;
+      return this.sendStatusUpdate('completed', message, completedData, webhookUrl, requestId, userContext);
+    } catch (error) {
+      console.error('❌ [WEBHOOK] Failed to send flow completed:', error);
+      return { success: false, error: error.toString() };
+    }
+  },
+  
+  makeWebhookCall: function(webhookUrl, payload) {
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        const response = UrlFetchApp.fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'FlowState-AppsScript-Webhook/V.06',
+            'X-Request-ID': payload.requestId || 'unknown'
+          },
+          payload: JSON.stringify(payload),
+          muteHttpExceptions: true,
+          timeout: this.DEFAULT_TIMEOUT
+        });
+        
+        const responseCode = response.getResponseCode();
+        
+        if (responseCode >= 200 && responseCode < 300) {
+          return { success: true, responseCode: responseCode, attempt: attempt };
+        } else {
+          lastError = `HTTP ${responseCode}`;
+        }
+        
+      } catch (fetchError) {
+        lastError = fetchError.toString();
+        if (attempt < this.MAX_RETRIES) {
+          Utilities.sleep(1000 * attempt);
+        }
+      }
+    }
+    
+    return { success: false, error: lastError, attempts: this.MAX_RETRIES };
+  },
+  
+  formatFileSize: function(bytes) {
+    try {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    } catch (error) {
+      return bytes + ' bytes';
+    }
+  }
+};
 
+// Helper function to extract webhook URL from request payload
+function getWebhookUrl(payload) {
+  try {
+    return payload.webhookUrl || payload.webhook_url || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Helper function to safely send webhook updates
+function safeWebhookUpdate(status, message, data, webhookUrl, requestId, userContext) {
+  try {
+    if (webhookUrl) {
+      WebhookNotifier.sendStatusUpdate(status, message, data, webhookUrl, requestId, userContext);
+    }
+  } catch (error) {
+    console.error('❌ Safe webhook update failed:', error);
+  }
+}
+
+/**
+ * Configuration Module
+ */
 class Config {
   static get RETRY_CONFIG() {
     return {
       maxRetries: 3,
-      baseDelay: 1000, // 1 second
-      maxDelay: 30000, // 30 seconds
+      baseDelay: 1000,
+      maxDelay: 30000,
       exponentialBackoff: true
     };
   }
 
   static get RATE_LIMIT_CONFIG() {
     return {
-      gmailApiCallsPerMinute: 250, // Gmail API quota is 250/min
-      driveApiCallsPerMinute: 1000, // Drive API quota is 1000/min
-      batchSize: 10, // Process emails in batches
-      delayBetweenBatches: 2000 // 2 seconds between batches
+      gmailApiCallsPerMinute: 250,
+      driveApiCallsPerMinute: 1000,
+      batchSize: 10,
+      delayBetweenBatches: 2000
     };
   }
 
   static get CIRCUIT_BREAKER_CONFIG() {
     return {
       failureThreshold: 5,
-      resetTimeout: 60000, // 1 minute
-      monitoringWindow: 300000 // 5 minutes
+      resetTimeout: 60000,
+      monitoringWindow: 300000
     };
   }
 
   static get VERSION() {
-    return 'V.06-PRODUCTION-MODULAR';
+    return 'V.06-PRODUCTION-MODULAR-WEBHOOK';
   }
 
   static getSecret() {
@@ -161,10 +364,8 @@ class RetryHandler {
 }
 
 /**
- * Gmail Processor Module
- * Handles Gmail API operations with retry logic and rate limiting
+ * Gmail Processor Module with Webhook Integration
  */
-
 class GmailProcessor {
   constructor() {
     this.rateLimiter = new RateLimiter();
@@ -177,7 +378,7 @@ class GmailProcessor {
     }, `Gmail search for query: ${searchQuery}`);
   }
 
-  async processEmailsBatch(threads, userConfig, startTime) {
+  async processEmailsBatch(threads, userConfig, startTime, webhookUrl, requestId, userContext) {
     const batchSize = Config.RATE_LIMIT_CONFIG.batchSize;
     const results = {
       processedEmails: 0,
@@ -187,16 +388,28 @@ class GmailProcessor {
     };
 
     console.log(`📧 Processing ${threads.length} threads in batches of ${batchSize}`);
+    
+    let totalAttachments = 0;
+    let processedAttachments = 0;
+
+    // Count total attachments first for progress tracking
+    for (const thread of threads) {
+      const messages = thread.getMessages();
+      for (const message of messages) {
+        totalAttachments += message.getAttachments().length;
+      }
+    }
 
     for (let i = 0; i < threads.length; i += batchSize) {
       const batch = threads.slice(i, i + batchSize);
       console.log(`📦 Processing batch ${Math.floor(i/batchSize) + 1} (${batch.length} threads)`);
 
       try {
-        const batchResults = await this.processBatch(batch, userConfig);
+        const batchResults = await this.processBatch(batch, userConfig, webhookUrl, requestId, userContext, processedAttachments, totalAttachments);
         results.processedEmails += batchResults.processedEmails;
         results.savedAttachments += batchResults.savedAttachments;
         results.processedAttachments.push(...batchResults.processedAttachments);
+        processedAttachments += batchResults.savedAttachments;
       } catch (error) {
         console.error(`❌ Batch processing error:`, error);
         results.errors.push({
@@ -205,9 +418,7 @@ class GmailProcessor {
         });
       }
 
-      // Delay between batches to avoid overwhelming APIs
       if (i + batchSize < threads.length) {
-        console.log(`⏱️ Waiting ${Config.RATE_LIMIT_CONFIG.delayBetweenBatches}ms between batches...`);
         Utilities.sleep(Config.RATE_LIMIT_CONFIG.delayBetweenBatches);
       }
     }
@@ -215,29 +426,31 @@ class GmailProcessor {
     return results;
   }
 
-  async processBatch(threads, userConfig) {
+  async processBatch(threads, userConfig, webhookUrl, requestId, userContext, startingCount, totalAttachments) {
     const batchResults = {
       processedEmails: 0,
       savedAttachments: 0,
       processedAttachments: []
     };
 
+    let attachmentCount = startingCount;
+
     for (const thread of threads) {
       try {
-        const threadResults = await this.processThread(thread, userConfig);
+        const threadResults = await this.processThread(thread, userConfig, webhookUrl, requestId, userContext, attachmentCount, totalAttachments);
         batchResults.processedEmails += threadResults.processedEmails;
         batchResults.savedAttachments += threadResults.savedAttachments;
         batchResults.processedAttachments.push(...threadResults.processedAttachments);
+        attachmentCount += threadResults.savedAttachments;
       } catch (error) {
         console.error(`❌ Thread processing error:`, error);
-        // Continue processing other threads even if one fails
       }
     }
 
     return batchResults;
   }
 
-  async processThread(thread, userConfig) {
+  async processThread(thread, userConfig, webhookUrl, requestId, userContext, startingCount, totalAttachments) {
     return await RetryHandler.executeWithRetry(async () => {
       await this.rateLimiter.checkGmailRate();
       
@@ -248,23 +461,28 @@ class GmailProcessor {
         processedAttachments: []
       };
 
+      let attachmentCount = startingCount;
+
       for (const message of messages) {
-        const messageResults = await this.processMessage(message, userConfig);
+        const messageResults = await this.processMessage(message, userConfig, webhookUrl, requestId, userContext, attachmentCount, totalAttachments);
         threadResults.processedEmails++;
         threadResults.savedAttachments += messageResults.savedAttachments;
         threadResults.processedAttachments.push(...messageResults.processedAttachments);
+        attachmentCount += messageResults.savedAttachments;
       }
 
       return threadResults;
     }, `Processing thread with ${thread.getMessages().length} messages`);
   }
 
-  async processMessage(message, userConfig) {
+  async processMessage(message, userConfig, webhookUrl, requestId, userContext, startingCount, totalAttachments) {
     const attachments = message.getAttachments();
     const messageResults = {
       savedAttachments: 0,
       processedAttachments: []
     };
+
+    let attachmentCount = startingCount;
 
     for (const attachment of attachments) {
       try {
@@ -273,11 +491,27 @@ class GmailProcessor {
           if (savedAttachment) {
             messageResults.savedAttachments++;
             messageResults.processedAttachments.push(savedAttachment);
+            attachmentCount++;
+            
+            // Send webhook update for each processed attachment
+            safeWebhookUpdate('processing', 
+              `Processed attachment: ${attachment.getName()}`, 
+              {
+                attachment: {
+                  fileName: attachment.getName(),
+                  fileSize: WebhookNotifier.formatFileSize(attachment.getSize())
+                },
+                progress: {
+                  current: attachmentCount,
+                  total: totalAttachments,
+                  percentage: Math.round((attachmentCount / totalAttachments) * 100)
+                }
+              }, 
+              webhookUrl, requestId, userContext);
           }
         }
       } catch (error) {
         console.error(`❌ Attachment processing error:`, error);
-        // Continue processing other attachments
       }
     }
 
@@ -365,7 +599,6 @@ class GmailProcessor {
       searchQuery = `from:${userEmail}`;
     }
     
-    // Add attachment filter and recent emails
     if (searchQuery) {
       searchQuery += ' has:attachment newer_than:7d';
     } else {
@@ -524,29 +757,16 @@ function doPost(e) {
     let requestData;
     try {
       requestData = JSON.parse(e.postData.contents);
-      console.log('📋 Request parsed:', {
-        hasSecret: !!requestData.secret,
-        hasPayload: !!requestData.payload,
-        topLevelKeys: Object.keys(requestData || {}),
-        payloadKeys: requestData.payload ? Object.keys(requestData.payload) : []
-      });
     } catch (parseError) {
       console.error('❌ JSON parsing failed:', parseError);
       return ResponseBuilder.createErrorResponse('Invalid JSON in request body');
     }
     
-    // Validate two-layer structure
-    if (!requestData.secret) {
-      console.error('❌ Missing secret in top-level structure');
-      return ResponseBuilder.createErrorResponse('Authentication failed: Missing secret in top-level structure');
+    if (!requestData.secret || !requestData.payload) {
+      console.error('❌ Missing secret or payload in top-level structure');
+      return ResponseBuilder.createErrorResponse('Missing secret or payload in top-level structure');
     }
     
-    if (!requestData.payload) {
-      console.error('❌ Missing payload in top-level structure');
-      return ResponseBuilder.createErrorResponse('Missing payload in top-level structure');
-    }
-    
-    // Validate authentication with circuit breaker
     try {
       if (!Config.validateSecret(requestData.secret)) {
         console.error('❌ Authentication failed: Invalid secret');
@@ -561,20 +781,11 @@ function doPost(e) {
     
     const payload = requestData.payload;
     
-    // Validate payload structure
     if (!payload.action) {
       console.error('❌ Missing action in payload');
       return ResponseBuilder.createErrorResponse('Missing action in payload');
     }
     
-    console.log('📧 Processing payload with action:', {
-      action: payload.action,
-      hasUserConfig: !!payload.userConfig,
-      hasUserEmail: !!payload.userEmail,
-      hasDebugInfo: !!payload.debug_info
-    });
-    
-    // Handle different actions from payload
     if (payload.action === 'process_gmail_flow') {
       return handleGmailFlowWithHardening(payload, startTime);
     } else if (payload.action === 'health_check') {
@@ -593,41 +804,62 @@ function doPost(e) {
 
 async function handleGmailFlowWithHardening(payload, startTime) {
   try {
-    console.log('📧 Processing Gmail flow with production hardening patterns');
+    console.log('📧 Processing Gmail flow with webhook notifications');
     
-    // Enhanced validation
-    if (!payload.userConfig) {
-      return ResponseBuilder.createErrorResponse('User configuration is required in payload');
+    if (!payload.userConfig || !payload.userConfig.driveFolder || !payload.userConfig.flowName) {
+      return ResponseBuilder.createErrorResponse('Missing required userConfig fields');
     }
     
-    if (!payload.userConfig.driveFolder) {
-      return ResponseBuilder.createErrorResponse('Drive folder is required in payload userConfig');
-    }
+    const webhookUrl = getWebhookUrl(payload);
+    const requestId = payload.debug_info?.request_id || 'unknown';
+    const userContext = { email: payload.userEmail };
     
-    if (!payload.userConfig.flowName) {
-      return ResponseBuilder.createErrorResponse('Flow name is required in payload userConfig');
-    }
+    // Send flow started webhook
+    safeWebhookUpdate('started', `Flow started for ${payload.userEmail}`, {
+      flow: {
+        name: payload.userConfig.flowName,
+        driveFolder: payload.userConfig.driveFolder,
+        senders: payload.userConfig.senders
+      }
+    }, webhookUrl, requestId, userContext);
     
     const processor = new GmailProcessor();
-    
-    // Build search query
     const searchQuery = processor.buildSearchQuery(payload.userConfig, payload.userEmail);
+    
     console.log('🔍 Gmail search query:', searchQuery);
     
-    // Search for emails with circuit breaker and retry logic
     const threads = await gmailCircuitBreaker.execute(
       async () => await processor.searchEmailsWithRetry(searchQuery, payload.userConfig.maxEmails || 10),
-      () => {
-        console.log('🔄 Gmail search fallback: returning empty results');
-        return [];
-      }
+      () => []
     );
     
     const emailsFound = threads.length;
     console.log(`📨 Found ${emailsFound} email threads`);
     
+    // Send search completed webhook
+    safeWebhookUpdate('processing', 
+      emailsFound > 0 ? `Found ${emailsFound} emails, processing attachments...` : 'No emails found',
+      {
+        search: {
+          query: searchQuery,
+          emailsFound: emailsFound,
+          nextStep: emailsFound > 0 ? 'Processing attachments' : 'Completed - no emails found'
+        }
+      }, 
+      webhookUrl, requestId, userContext);
+    
     if (emailsFound === 0) {
       const processingTime = Date.now() - startTime;
+      
+      // Send completion webhook
+      safeWebhookUpdate('completed', 'No emails found matching criteria', {
+        results: {
+          emailsFound: 0,
+          attachmentsSaved: 0,
+          processingTime: processingTime + 'ms'
+        }
+      }, webhookUrl, requestId, userContext);
+      
       return ResponseBuilder.createSuccessResponse('No emails found matching the search criteria', {
         processedEmails: 0,
         savedAttachments: 0,
@@ -635,33 +867,32 @@ async function handleGmailFlowWithHardening(payload, startTime) {
         attachments: 0,
         flowName: payload.userConfig.flowName,
         userEmail: payload.userEmail,
-        searchQuery: searchQuery,
-        debugInfo: {
-          userEmail: payload.userEmail,
-          searchQuery: searchQuery,
-          emailsFound: 0,
-          processedEmails: 0,
-          savedAttachments: 0,
-          hardeningFeatures: ['retry-logic', 'rate-limiting', 'circuit-breaker', 'batch-processing']
-        }
+        searchQuery: searchQuery
       }, processingTime);
     }
     
-    // Process emails with batch processing and circuit breaker
     const results = await driveCircuitBreaker.execute(
-      async () => await processor.processEmailsBatch(threads, payload.userConfig, startTime),
-      () => {
-        console.log('🔄 Drive processing fallback: returning partial results');
-        return {
-          processedEmails: emailsFound,
-          savedAttachments: 0,
-          processedAttachments: [],
-          errors: ['Drive service temporarily unavailable - attachments not saved']
-        };
-      }
+      async () => await processor.processEmailsBatch(threads, payload.userConfig, startTime, webhookUrl, requestId, userContext),
+      () => ({
+        processedEmails: emailsFound,
+        savedAttachments: 0,
+        processedAttachments: [],
+        errors: ['Drive service temporarily unavailable']
+      })
     );
     
     const processingTime = Date.now() - startTime;
+    
+    // Send completion webhook
+    safeWebhookUpdate('completed', `Flow completed: ${results.savedAttachments} attachments saved`, {
+      results: {
+        emailsFound: emailsFound,
+        emailsProcessed: results.processedEmails,
+        attachmentsSaved: results.savedAttachments,
+        processingTime: processingTime + 'ms'
+      },
+      files: results.processedAttachments || []
+    }, webhookUrl, requestId, userContext);
     
     const responseData = {
       processedEmails: results.processedEmails,
@@ -672,28 +903,10 @@ async function handleGmailFlowWithHardening(payload, startTime) {
       userEmail: payload.userEmail,
       authMethod: 'two-layer-secret-payload',
       searchQuery: searchQuery,
-      processedAttachments: results.processedAttachments,
-      debugInfo: {
-        userEmail: payload.userEmail,
-        searchQuery: searchQuery,
-        emailsFound: emailsFound,
-        processedEmails: results.processedEmails,
-        savedAttachments: results.savedAttachments,
-        driveFolder: payload.userConfig.driveFolder,
-        allowedFileTypes: payload.userConfig.fileTypes,
-        hardeningFeatures: ['retry-logic', 'rate-limiting', 'circuit-breaker', 'batch-processing'],
-        requestId: payload.debug_info?.request_id || 'unknown',
-        errors: results.errors || []
-      }
+      processedAttachments: results.processedAttachments
     };
     
-    console.log('✅ Gmail flow completed successfully with production hardening:', {
-      processedEmails: results.processedEmails,
-      savedAttachments: results.savedAttachments,
-      emailsFound: emailsFound,
-      authMethod: responseData.authMethod,
-      errors: results.errors?.length || 0
-    });
+    console.log('✅ Gmail flow completed successfully with webhook notifications');
     
     return ResponseBuilder.createSuccessResponse(
       `Processed ${results.processedEmails} emails and saved ${results.savedAttachments} attachments for ${payload.userEmail}`,
@@ -702,8 +915,21 @@ async function handleGmailFlowWithHardening(payload, startTime) {
     );
       
   } catch (error) {
-    console.error('❌ Error processing Gmail flow with hardening:', error);
+    console.error('❌ Error processing Gmail flow:', error);
     const processingTime = Date.now() - startTime;
+    
+    // Send error webhook
+    const webhookUrl = getWebhookUrl(payload);
+    const requestId = payload.debug_info?.request_id || 'unknown';
+    const userContext = { email: payload.userEmail };
+    
+    safeWebhookUpdate('error', error.toString(), {
+      error: {
+        message: error.toString(),
+        timestamp: new Date().toISOString()
+      }
+    }, webhookUrl, requestId, userContext);
+    
     return ResponseBuilder.createErrorResponse('Failed to process Gmail flow: ' + error.toString(), null, processingTime);
   }
 }
