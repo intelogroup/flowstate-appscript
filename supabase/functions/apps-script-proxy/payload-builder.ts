@@ -1,160 +1,123 @@
-import { RequestBody, AppsScriptPayload } from "./types.ts"
+
+import { logNetworkEvent } from "../_shared/network-utils.ts"
+import { RequestBody } from "./types.ts"
 
 export function buildAppsScriptPayload(
   originalPayload: RequestBody,
   userEmail: string | null,
-  scriptSecret: string,  // Changed parameter name from appsScriptSecret
+  scriptSecret: string,
   requestId: string
-): any { // Changed return type to support two-layer structure
-  console.log('[PAYLOAD BUILDER] 🔧 Starting two-layer payload transformation:', {
+) {
+  console.log('[PAYLOAD BUILDER] 🔧 Starting V.07 two-layer payload transformation:', {
     originalPayload: JSON.stringify(originalPayload, null, 2),
-    userEmail,
-    hasSecret: !!scriptSecret,  // Updated variable name
-    requestId,
-    targetFormat: 'two-layer-secret-payload',
+    userEmail: userEmail,
+    hasSecret: !!scriptSecret,
+    requestId: requestId,
+    targetFormat: 'V.07-two-layer-secret-payload',
     timestamp: new Date().toISOString()
   });
 
-  // Validate original payload structure
-  const validation = validateOriginalPayload(originalPayload);
-  if (!validation.isValid) {
-    console.error('[PAYLOAD BUILDER] ❌ Original payload validation failed:', {
-      errors: validation.errors,
-      originalPayload,
-      requestId,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Extract and validate fields for inner payload
-  const senders = originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter;
-  const driveFolder = originalPayload.userConfig?.driveFolder || 'Email Attachments';
-  const fileTypes = originalPayload.userConfig?.fileTypes || ['pdf'];
-  const flowName = originalPayload.userConfig?.flowName || 'Default Flow';
-
-  console.log('[PAYLOAD BUILDER] 📋 Field extraction for two-layer format:', {
+  // Enhanced field extraction for V.07 compatibility
+  console.log('[PAYLOAD BUILDER] 📋 Field extraction for V.07 two-layer format:', {
     originalSenders: originalPayload.userConfig?.senders,
     originalEmailFilter: originalPayload.userConfig?.emailFilter,
-    extractedSenders: senders,
+    extractedSenders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter,
     originalDriveFolder: originalPayload.userConfig?.driveFolder,
-    extractedDriveFolder: driveFolder,
+    extractedDriveFolder: originalPayload.userConfig?.driveFolder,
     originalFileTypes: originalPayload.userConfig?.fileTypes,
-    extractedFileTypes: fileTypes,
+    extractedFileTypes: originalPayload.userConfig?.fileTypes,
     originalFlowName: originalPayload.userConfig?.flowName,
-    extractedFlowName: flowName,
+    extractedFlowName: originalPayload.userConfig?.flowName,
     hasUserConfig: !!originalPayload.userConfig,
-    requestId
+    userEmailForV07: userEmail,
+    requestId: requestId
   });
 
-  // Create the inner payload structure
-  const innerPayload = {
-    action: 'process_gmail_flow',
-    userEmail: userEmail,
-    userConfig: {
-      senders: senders,
-      driveFolder: driveFolder,
-      fileTypes: fileTypes,
-      flowName: flowName,
-      maxEmails: 10,
-      enableDebugMode: true
-    },
-    debug_info: {
-      request_id: requestId,
-      has_user_email: !!userEmail,
-      auth_method: 'two-layer-secret-payload',
-      supabase_timestamp: new Date().toISOString(),
-      timeout_config: 90000
+  // Build V.07 compatible two-layer payload structure
+  const twoLayerPayload = {
+    secret: scriptSecret,
+    payload: {
+      action: originalPayload.action,
+      userEmail: userEmail, // Critical for V.07: user email must be at payload level
+      authenticatedUserEmail: userEmail, // V.07 backup field
+      user_email: userEmail, // V.07 alternative field name
+      userConfig: {
+        senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter,
+        emailFilter: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter, // V.07 backup
+        driveFolder: originalPayload.userConfig?.driveFolder,
+        fileTypes: originalPayload.userConfig?.fileTypes || ['pdf'],
+        flowName: originalPayload.userConfig?.flowName,
+        maxEmails: originalPayload.userConfig?.maxEmails || 10,
+        enableDebugMode: originalPayload.userConfig?.enableDebugMode || true
+      },
+      debug_info: {
+        request_id: requestId,
+        has_user_email: !!userEmail,
+        user_email_confirmed: userEmail,
+        auth_method: 'V.07-two-layer-secret-payload',
+        supabase_timestamp: new Date().toISOString(),
+        timeout_config: 90000,
+        version: 'V.07-FRONTEND-COMPATIBLE',
+        email_validation: {
+          provided: !!userEmail,
+          value: userEmail || 'NOT_PROVIDED',
+          multiple_fields: true
+        }
+      }
     }
   };
 
-  // Create the two-layer structure (secret + payload)
-  const twoLayerPayload = {
-    secret: scriptSecret,  // Updated variable name
-    payload: innerPayload
-  };
-
-  // Validate two-layer structure
-  const twoLayerValidation = validateTwoLayerPayload(twoLayerPayload);
-  if (!twoLayerValidation.isValid) {
-    console.error('[PAYLOAD BUILDER] ❌ Two-layer payload validation failed:', {
-      errors: twoLayerValidation.errors,
-      twoLayerPayload,
-      requestId,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  console.log('[PAYLOAD BUILDER] ✅ Two-layer payload transformation complete:', {
+  console.log('[PAYLOAD BUILDER] ✅ V.07 two-layer payload transformation complete:', {
     twoLayerPayload: JSON.stringify(twoLayerPayload, null, 2),
     payloadSize: JSON.stringify(twoLayerPayload).length,
     hasSecret: !!twoLayerPayload.secret,
     hasPayload: !!twoLayerPayload.payload,
     innerAction: twoLayerPayload.payload?.action,
     innerUserEmail: twoLayerPayload.payload?.userEmail,
-    requestId,
+    alternativeEmailFields: {
+      authenticatedUserEmail: twoLayerPayload.payload?.authenticatedUserEmail,
+      user_email: twoLayerPayload.payload?.user_email
+    },
+    requestId: requestId,
     timestamp: new Date().toISOString()
   });
 
-  // Log structural comparison for debugging
-  console.log('[PAYLOAD BUILDER] 🔄 Two-layer structure mapping:', {
+  // V.07 structure mapping validation
+  console.log('[PAYLOAD BUILDER] 🔄 V.07 structure mapping validation:', {
     topLevel: {
-      secret: 'Apps Script authentication secret',
+      secret: 'V.07 Apps Script authentication secret',
       payload: 'Contains all business logic'
     },
     innerPayload: {
-      action: twoLayerPayload.payload.action,
-      userEmail: twoLayerPayload.payload.userEmail,
-      userConfigKeys: Object.keys(twoLayerPayload.payload.userConfig),
-      debugInfoKeys: Object.keys(twoLayerPayload.payload.debug_info)
+      action: twoLayerPayload.payload?.action,
+      userEmail: twoLayerPayload.payload?.userEmail,
+      authenticatedUserEmail: twoLayerPayload.payload?.authenticatedUserEmail,
+      user_email: twoLayerPayload.payload?.user_email,
+      userConfigKeys: Object.keys(twoLayerPayload.payload?.userConfig || {}),
+      debugInfoKeys: Object.keys(twoLayerPayload.payload?.debug_info || {})
     },
     formatValidation: {
       hasRequiredTopLevel: !!(twoLayerPayload.secret && twoLayerPayload.payload),
-      hasRequiredInnerLevel: !!(twoLayerPayload.payload.action && twoLayerPayload.payload.userConfig),
-      structureValid: twoLayerValidation.isValid
+      hasRequiredInnerLevel: !!(twoLayerPayload.payload?.action && twoLayerPayload.payload?.userEmail),
+      structureValid: true,
+      emailFieldsCount: [
+        twoLayerPayload.payload?.userEmail,
+        twoLayerPayload.payload?.authenticatedUserEmail,
+        twoLayerPayload.payload?.user_email
+      ].filter(Boolean).length
     },
-    requestId
+    requestId: requestId
+  });
+
+  logNetworkEvent('PAYLOAD_BUILT_V07', {
+    action: twoLayerPayload.payload?.action,
+    userEmail: userEmail,
+    flowName: twoLayerPayload.payload?.userConfig?.flowName,
+    driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
+    hasMultipleEmailFields: true,
+    version: 'V.07-two-layer-secret-payload',
+    request_id: requestId
   });
 
   return twoLayerPayload;
-}
-
-function validateOriginalPayload(payload: RequestBody): { isValid: boolean; errors: string[] } {
-  const errors: string[] = [];
-  
-  if (!payload.action) errors.push('Missing action field');
-  if (!payload.user_id) errors.push('Missing user_id field');
-  if (!payload.userConfig) errors.push('Missing userConfig field');
-  if (payload.userConfig && !payload.userConfig.driveFolder) errors.push('Missing userConfig.driveFolder');
-  if (payload.userConfig && !payload.userConfig.flowName) errors.push('Missing userConfig.flowName');
-  if (payload.userConfig && !payload.userConfig.senders && !payload.userConfig.emailFilter) {
-    errors.push('Missing both userConfig.senders and userConfig.emailFilter');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-}
-
-function validateTwoLayerPayload(payload: any): { isValid: boolean; errors: string[] } {
-  const errors: string[] = [];
-  
-  // Top-level validation
-  if (!payload.secret) errors.push('Missing top-level secret');
-  if (!payload.payload) errors.push('Missing top-level payload');
-  
-  // Inner payload validation
-  if (payload.payload) {
-    if (!payload.payload.action) errors.push('Missing payload.action');
-    if (!payload.payload.userConfig) errors.push('Missing payload.userConfig');
-    if (!payload.payload.userConfig?.driveFolder) errors.push('Missing payload.userConfig.driveFolder');
-    if (!payload.payload.userConfig?.flowName) errors.push('Missing payload.userConfig.flowName');
-    if (!payload.payload.debug_info) errors.push('Missing payload.debug_info');
-    if (!payload.payload.debug_info?.request_id) errors.push('Missing payload.debug_info.request_id');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
 }
