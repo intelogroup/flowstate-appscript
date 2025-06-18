@@ -12,6 +12,7 @@ export function buildAppsScriptPayload(
     originalPayload: JSON.stringify(originalPayload, null, 2),
     userEmail: userEmail,
     hasSecret: !!scriptSecret,
+    secretLength: scriptSecret?.length || 0,
     requestId: requestId,
     targetFormat: 'V.07-two-layer-secret-payload',
     timestamp: new Date().toISOString()
@@ -33,14 +34,20 @@ export function buildAppsScriptPayload(
     requestId: requestId
   });
 
-  // Build V.07 compatible two-layer payload structure
+  // Build V.07 compatible two-layer payload structure with enhanced authentication
   const twoLayerPayload = {
     secret: scriptSecret,
     payload: {
       action: originalPayload.action,
-      userEmail: userEmail, // Critical for V.07: user email must be at payload level
+      userEmail: userEmail, // Primary email field for V.07
       authenticatedUserEmail: userEmail, // V.07 backup field
       user_email: userEmail, // V.07 alternative field name
+      authenticatedUser: {
+        email: userEmail,
+        status: "authenticated",
+        source: "supabase_auth",
+        timestamp: new Date().toISOString()
+      },
       userConfig: {
         senders: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter,
         emailFilter: originalPayload.userConfig?.senders || originalPayload.userConfig?.emailFilter, // V.07 backup
@@ -61,7 +68,14 @@ export function buildAppsScriptPayload(
         email_validation: {
           provided: !!userEmail,
           value: userEmail || 'NOT_PROVIDED',
-          multiple_fields: true
+          multiple_fields: true,
+          authenticated_user_object: true
+        },
+        payload_structure: {
+          secret_present: !!scriptSecret,
+          secret_length: scriptSecret?.length || 0,
+          two_layer_format: true,
+          authentication_enhanced: true
         }
       }
     }
@@ -76,7 +90,13 @@ export function buildAppsScriptPayload(
     innerUserEmail: twoLayerPayload.payload?.userEmail,
     alternativeEmailFields: {
       authenticatedUserEmail: twoLayerPayload.payload?.authenticatedUserEmail,
-      user_email: twoLayerPayload.payload?.user_email
+      user_email: twoLayerPayload.payload?.user_email,
+      authenticatedUser: !!twoLayerPayload.payload?.authenticatedUser
+    },
+    authenticationStructure: {
+      hasAuthenticatedUser: !!twoLayerPayload.payload?.authenticatedUser,
+      userEmailFields: 4, // userEmail, authenticatedUserEmail, user_email, authenticatedUser.email
+      authStatus: twoLayerPayload.payload?.authenticatedUser?.status
     },
     requestId: requestId,
     timestamp: new Date().toISOString()
@@ -86,13 +106,14 @@ export function buildAppsScriptPayload(
   console.log('[PAYLOAD BUILDER] 🔄 V.07 structure mapping validation:', {
     topLevel: {
       secret: 'V.07 Apps Script authentication secret',
-      payload: 'Contains all business logic'
+      payload: 'Contains all business logic and authentication'
     },
     innerPayload: {
       action: twoLayerPayload.payload?.action,
       userEmail: twoLayerPayload.payload?.userEmail,
       authenticatedUserEmail: twoLayerPayload.payload?.authenticatedUserEmail,
       user_email: twoLayerPayload.payload?.user_email,
+      authenticatedUser: twoLayerPayload.payload?.authenticatedUser,
       userConfigKeys: Object.keys(twoLayerPayload.payload?.userConfig || {}),
       debugInfoKeys: Object.keys(twoLayerPayload.payload?.debug_info || {})
     },
@@ -103,8 +124,16 @@ export function buildAppsScriptPayload(
       emailFieldsCount: [
         twoLayerPayload.payload?.userEmail,
         twoLayerPayload.payload?.authenticatedUserEmail,
-        twoLayerPayload.payload?.user_email
-      ].filter(Boolean).length
+        twoLayerPayload.payload?.user_email,
+        twoLayerPayload.payload?.authenticatedUser?.email
+      ].filter(Boolean).length,
+      authenticationEnhanced: !!twoLayerPayload.payload?.authenticatedUser
+    },
+    secretValidation: {
+      present: !!scriptSecret,
+      length: scriptSecret?.length || 0,
+      format: typeof scriptSecret,
+      preview: scriptSecret ? `${scriptSecret.substring(0, 8)}...` : 'None'
     },
     requestId: requestId
   });
@@ -115,6 +144,7 @@ export function buildAppsScriptPayload(
     flowName: twoLayerPayload.payload?.userConfig?.flowName,
     driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
     hasMultipleEmailFields: true,
+    hasAuthenticatedUser: true,
     version: 'V.07-two-layer-secret-payload',
     request_id: requestId
   });

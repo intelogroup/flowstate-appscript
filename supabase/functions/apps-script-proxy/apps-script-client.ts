@@ -1,15 +1,16 @@
 
 export async function callAppsScript(
   appsScriptUrl: string,
-  twoLayerPayload: any, // Changed from AppsScriptPayload to support two-layer
+  twoLayerPayload: any,
   requestId: string
 ): Promise<any> {
-  console.log('[APPS SCRIPT CLIENT] 🚀 Starting Apps Script call with two-layer format:', {
+  console.log('[APPS SCRIPT CLIENT] 🚀 Starting Apps Script call with V.07 two-layer format:', {
     url: appsScriptUrl,
     hasSecret: !!twoLayerPayload.secret,
     hasPayload: !!twoLayerPayload.payload,
     innerAction: twoLayerPayload.payload?.action,
     innerUserEmail: twoLayerPayload.payload?.userEmail,
+    secretLength: twoLayerPayload.secret?.length || 0,
     requestId,
     timestamp: new Date().toISOString()
   });
@@ -26,19 +27,18 @@ export async function callAppsScript(
     throw new Error(`Invalid two-layer payload structure: ${structureValidation.errors.join(', ')}`);
   }
 
-  console.log('[APPS SCRIPT CLIENT] 📤 Sending two-layer payload to Apps Script:', {
+  console.log('[APPS SCRIPT CLIENT] 📤 Sending V.07 payload with debug info:', {
     payloadStructure: {
       topLevel: Object.keys(twoLayerPayload),
-      secret: twoLayerPayload.secret ? 'Present' : 'Missing',
+      secret: twoLayerPayload.secret ? `${twoLayerPayload.secret.substring(0, 8)}...` : 'Missing',
       payload: twoLayerPayload.payload ? Object.keys(twoLayerPayload.payload) : 'Missing'
     },
     innerPayloadDetails: twoLayerPayload.payload ? {
       action: twoLayerPayload.payload.action,
       hasUserConfig: !!twoLayerPayload.payload.userConfig,
       hasUserEmail: !!twoLayerPayload.payload.userEmail,
-      hasDebugInfo: !!twoLayerPayload.payload.debug_info,
-      userConfigKeys: twoLayerPayload.payload.userConfig ? Object.keys(twoLayerPayload.payload.userConfig) : [],
-      debugInfoKeys: twoLayerPayload.payload.debug_info ? Object.keys(twoLayerPayload.payload.debug_info) : []
+      hasAuthenticatedUser: !!twoLayerPayload.payload.authenticatedUser,
+      userConfigKeys: twoLayerPayload.payload.userConfig ? Object.keys(twoLayerPayload.payload.userConfig) : []
     } : null,
     payloadSize: JSON.stringify(twoLayerPayload).length,
     requestId,
@@ -65,11 +65,7 @@ export async function callAppsScript(
       statusText: response.statusText,
       ok: response.ok,
       url: response.url,
-      type: response.type,
-      redirected: response.redirected,
-      responseHeaders: Object.fromEntries(response.headers.entries()),
       contentType: response.headers.get('content-type'),
-      contentLength: response.headers.get('content-length'),
       requestId,
       timestamp: new Date().toISOString()
     });
@@ -81,15 +77,30 @@ export async function callAppsScript(
         statusText: response.statusText,
         errorBody: errorText,
         errorLength: errorText.length,
+        sentSecret: twoLayerPayload.secret ? `${twoLayerPayload.secret.substring(0, 8)}...` : 'None',
         sentPayloadStructure: {
           hasSecret: !!twoLayerPayload.secret,
           hasPayload: !!twoLayerPayload.payload,
           innerAction: twoLayerPayload.payload?.action
         },
+        authenticationDebug: {
+          expectedFormat: 'V.07 two-layer with secret and payload',
+          sentFormat: typeof twoLayerPayload,
+          secretPresent: !!twoLayerPayload.secret,
+          payloadPresent: !!twoLayerPayload.payload
+        },
         requestId,
         timestamp: new Date().toISOString()
       });
-      throw new Error(`Apps Script HTTP ${response.status}: ${errorText}`);
+      
+      // Provide more specific error messages for common authentication issues
+      if (response.status === 401) {
+        throw new Error(`Apps Script authentication failed (401): Likely secret mismatch. Verify SCRIPT_SECRET matches Apps Script property. Error: ${errorText}`);
+      } else if (response.status === 403) {
+        throw new Error(`Apps Script access forbidden (403): Check deployment permissions. Error: ${errorText}`);
+      } else {
+        throw new Error(`Apps Script HTTP ${response.status}: ${errorText}`);
+      }
     }
 
     let responseText;
@@ -193,7 +204,13 @@ export async function callAppsScript(
       sentPayloadStructure: {
         hasSecret: !!twoLayerPayload.secret,
         hasPayload: !!twoLayerPayload.payload,
-        innerAction: twoLayerPayload.payload?.action
+        innerAction: twoLayerPayload.payload?.action,
+        secretLength: twoLayerPayload.secret?.length || 0
+      },
+      debuggingTips: {
+        checkSecret: 'Verify SCRIPT_SECRET matches Apps Script property',
+        checkDeployment: 'Ensure Apps Script is deployed with correct permissions',
+        checkFormat: 'Verify V.07 two-layer payload structure'
       },
       requestId,
       timestamp: new Date().toISOString()
