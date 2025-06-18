@@ -1,6 +1,13 @@
-
 import { FlowConfig, FlowExecutionResult } from './types/flowTypes';
 import { supabase } from '@/integrations/supabase/client';
+
+export interface DetailedError {
+  type: 'authentication' | 'network' | 'apps_script' | 'timeout' | 'unknown';
+  message: string;
+  details?: any;
+  rawResponse?: any;
+  timestamp: string;
+}
 
 export class FlowExecutionService {
   private static readonly EDGE_FUNCTION_URL = 'https://mikrosnrkgxlbbsjdbjn.supabase.co/functions/v1/apps-script-proxy';
@@ -13,13 +20,10 @@ export class FlowExecutionService {
     const startTime = Date.now();
     
     try {
-      console.log('[FLOW EXECUTION] 🚀 Starting flow execution with webhook integration:', {
+      console.log('[FLOW EXECUTION] 🚀 Starting flow execution with enhanced error tracking:', {
         flowId,
         userId: userConfig.userId,
         flowName: userConfig.flowName,
-        driveFolder: userConfig.driveFolder,
-        senders: userConfig.senders,
-        webhookUrl: this.WEBHOOK_URL,
         timestamp: new Date().toISOString()
       });
       
@@ -27,41 +31,29 @@ export class FlowExecutionService {
 
       const payload = this.buildPayload(flowId, userConfig);
 
-      console.log('[FLOW EXECUTION] 🔐 Checking Supabase auth state...');
+      console.log('[FLOW EXECUTION] 🔐 Checking authentication state...');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log('[FLOW EXECUTION] 🔐 Supabase session details:', {
-        hasSession: !!session,
-        hasUser: !!session?.user,
-        userId: session?.user?.id,
-        userEmail: session?.user?.email,
-        hasAccessToken: !!session?.access_token,
-        timestamp: new Date().toISOString()
-      });
-
       if (!session || !session.access_token) {
-        console.error('[FLOW EXECUTION] ❌ CRITICAL: No valid Supabase session found');
-        throw new Error('Authentication required: No valid session found');
+        const authError: DetailedError = {
+          type: 'authentication',
+          message: 'No valid Supabase session found',
+          details: { hasSession: !!session, sessionError },
+          timestamp: new Date().toISOString()
+        };
+        console.error('[FLOW EXECUTION] ❌ Authentication error:', authError);
+        throw new Error(`Authentication required: ${authError.message}`);
       }
 
       const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session.access_token}`,
         'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pa3Jvc25ya2d4bGJic2pkYmpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjMwMzcsImV4cCI6MjA2NTU5OTAzN30.mrTrjtKDsS99v87pr64Gt1Rib6JU5V9gIfdly4bl9J0',
-        'x-debug-source': 'flow-execution-service-webhook',
+        'x-debug-source': 'flow-execution-service-enhanced',
         'x-user-agent': navigator.userAgent || 'unknown'
       };
 
-      console.log('[FLOW EXECUTION] 📤 Making request with webhook URL integration:', {
-        url: this.EDGE_FUNCTION_URL,
-        webhookUrl: this.WEBHOOK_URL,
-        payloadAction: payload.action,
-        payloadUserId: payload.user_id,
-        payloadFlowName: payload.userConfig.flowName,
-        hasWebhookUrl: !!payload.webhookUrl,
-        timestamp: new Date().toISOString()
-      });
-
+      console.log('[FLOW EXECUTION] 📤 Making request with enhanced tracking...');
       const fetchStartTime = Date.now();
 
       let response: Response;
@@ -73,66 +65,63 @@ export class FlowExecutionService {
         });
         
         const fetchDuration = Date.now() - fetchStartTime;
-        console.log('[FLOW EXECUTION] 📥 Fetch completed with webhook integration:', {
-          fetchDuration: `${fetchDuration}ms`,
+        console.log('[FLOW EXECUTION] 📥 Response received:', {
           status: response.status,
           statusText: response.statusText,
           ok: response.ok,
-          webhookEnabled: true,
+          fetchDuration: `${fetchDuration}ms`,
           timestamp: new Date().toISOString()
         });
 
       } catch (fetchError) {
-        const fetchDuration = Date.now() - fetchStartTime;
-        console.error('[FLOW EXECUTION] 💥 FETCH ERROR:', {
-          fetchDuration: `${fetchDuration}ms`,
-          error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        const networkError: DetailedError = {
+          type: 'network',
+          message: `Network request failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`,
+          details: { fetchError },
           timestamp: new Date().toISOString()
-        });
-        throw new Error(`Network request failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+        };
+        console.error('[FLOW EXECUTION] 💥 Network error:', networkError);
+        throw new Error(networkError.message);
       }
 
       if (!response.ok) {
         let errorText;
         try {
           errorText = await response.text();
-          console.error('[FLOW EXECUTION] ❌ Error response received:', {
-            status: response.status,
-            statusText: response.statusText,
-            errorText,
+          const httpError: DetailedError = {
+            type: response.status === 401 ? 'authentication' : 'network',
+            message: `HTTP ${response.status}: ${errorText}`,
+            details: { status: response.status, statusText: response.statusText },
+            rawResponse: errorText,
             timestamp: new Date().toISOString()
-          });
+          };
+          console.error('[FLOW EXECUTION] ❌ HTTP error:', httpError);
         } catch (textError) {
           errorText = `HTTP ${response.status}: ${response.statusText}`;
         }
         
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(errorText);
       }
 
       let result;
       try {
         const responseText = await response.text();
-        console.log('[FLOW EXECUTION] 📋 Raw response received:', {
+        console.log('[FLOW EXECUTION] 📋 Raw response:', {
           responseLength: responseText.length,
-          responsePreview: responseText.substring(0, 200),
+          responsePreview: responseText.substring(0, 500),
           timestamp: new Date().toISOString()
         });
         
         result = JSON.parse(responseText);
-        console.log('[FLOW EXECUTION] 📊 Response parsed successfully with webhook integration:', {
-          hasResult: !!result,
-          resultSuccess: result?.success,
-          hasError: !!result?.error,
-          hasData: !!result?.data,
-          webhookIntegrated: true,
-          timestamp: new Date().toISOString()
-        });
       } catch (parseError) {
-        console.error('[FLOW EXECUTION] ❌ Failed to parse response as JSON:', {
-          parseError: parseError instanceof Error ? parseError.message : String(parseError),
+        const jsonError: DetailedError = {
+          type: 'apps_script',
+          message: 'Invalid JSON response from server',
+          details: { parseError },
           timestamp: new Date().toISOString()
-        });
-        throw new Error('Invalid JSON response from server');
+        };
+        console.error('[FLOW EXECUTION] ❌ JSON parse error:', jsonError);
+        throw new Error(jsonError.message);
       }
 
       return this.processResult(result);
@@ -146,13 +135,18 @@ export class FlowExecutionService {
         flowId,
         userId: userConfig.userId,
         duration: `${duration}ms`,
-        webhookEnabled: true,
         timestamp: new Date().toISOString()
       });
       
       return {
         success: false,
-        error: errorMsg
+        error: errorMsg,
+        details: {
+          duration,
+          flowId,
+          userId: userConfig.userId,
+          timestamp: new Date().toISOString()
+        }
       };
     }
   }
@@ -204,11 +198,10 @@ export class FlowExecutionService {
   }
 
   private static processResult(result: any): FlowExecutionResult {
-    console.log('[FLOW EXECUTION] 📊 Processing result with webhook integration:', {
+    console.log('[FLOW EXECUTION] 📊 Processing result with enhanced tracking:', {
       hasResult: !!result,
       resultSuccess: result?.success,
       hasAppsScriptResponse: !!result?.apps_script_response,
-      webhookEnabled: true,
       fullResult: result
     });
 
@@ -221,40 +214,49 @@ export class FlowExecutionService {
         emailsFound: appsScriptData.data?.emailsFound || 0
       };
       
-      console.log('[FLOW EXECUTION] ✅ Processing successful result with webhook integration:', successData);
-
       return {
         success: true,
         data: {
           ...successData,
           performance_metrics: result.performance_metrics,
-          debugInfo: appsScriptData.data?.debugInfo || result.debug_info
+          debugInfo: appsScriptData.data?.debugInfo || result.debug_info,
+          rawResponse: result
         }
       };
     } else if (appsScriptData.status === 'error') {
       const errorMsg = appsScriptData.message || 'Apps Script execution failed';
-      console.error('[FLOW EXECUTION] ❌ Apps Script returned error:', {
+      console.error('[FLOW EXECUTION] ❌ Apps Script error:', {
         status: appsScriptData.status,
         message: errorMsg,
-        webhookEnabled: true
+        rawResponse: result
       });
       
       return {
         success: false,
-        error: errorMsg
+        error: errorMsg,
+        details: {
+          appsScriptResponse: appsScriptData,
+          rawResponse: result,
+          timestamp: new Date().toISOString()
+        }
       };
     } else {
-      const errorMsg = result.error || appsScriptData.message || 'Unknown execution error';
-      console.error('[FLOW EXECUTION] ❌ Unexpected result format:', {
+      const errorMsg = result.error || appsScriptData.message || 'Unexpected result format';
+      console.error('[FLOW EXECUTION] ❌ Unexpected result:', {
         resultSuccess: result.success,
         appsScriptStatus: appsScriptData.status,
         errorMessage: errorMsg,
-        webhookEnabled: true
+        rawResponse: result
       });
       
       return {
         success: false,
-        error: errorMsg
+        error: errorMsg,
+        details: {
+          unexpectedFormat: true,
+          rawResponse: result,
+          timestamp: new Date().toISOString()
+        }
       };
     }
   }

@@ -20,29 +20,16 @@ export interface FlowExecutionResult {
       total_duration: number;
     };
     debugInfo?: any;
+    rawResponse?: any;
   };
   error?: string;
-}
-
-export interface CreateFlowData {
-  flowName: string;
-  emailFilter: string;
-  driveFolder: string;
-  fileTypes: string[];
-  autoRun: boolean;
-  frequency: string;
-  userId: string;
-}
-
-export interface FlowValidationResult {
-  isValid: boolean;
-  errors: string[];
-}
-
-export interface FlowExecutionMetrics {
-  startTime: number;
-  endTime?: number;
-  duration?: number;
-  attachmentsProcessed: number;
-  emailsProcessed: number;
+  details?: {
+    duration?: number;
+    flowId?: string;
+    userId?: string;
+    timestamp?: string;
+    appsScriptResponse?: any;
+    rawResponse?: any;
+    unexpectedFormat?: boolean;
+  };
 }

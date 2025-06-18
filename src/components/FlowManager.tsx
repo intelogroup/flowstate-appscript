@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
@@ -10,7 +11,18 @@ import AuthStatusAlert from '@/components/flow/AuthStatusAlert';
 import FlowsTabContent from '@/components/flow/FlowsTabContent';
 import FlowFormCard from '@/components/app/FlowFormCard';
 import FlowProgressModal from '@/components/flow/FlowProgressModal';
+import FlowDebugPanel from '@/components/flow/FlowDebugPanel';
+import FlowStatusDashboard from '@/components/flow/FlowStatusDashboard';
 import type { UserFlow } from '@/hooks/flow-execution/types';
+
+interface DebugLog {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'warning' | 'error' | 'success';
+  category: 'auth' | 'network' | 'apps_script' | 'webhook' | 'ui';
+  message: string;
+  details?: any;
+}
 
 const FlowManager = () => {
   const { user, isGoogleConnected } = useAuth();
@@ -18,7 +30,13 @@ const FlowManager = () => {
   const { addLog } = useFlowLogs();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('flows');
-  const [progressModal, setProgressModal] = useState<{ isOpen: boolean; flowName: string; requestId: string | null }>({
+  const [debugLogs, setDebugLogs] = useState<DebugLog[]>([]);
+  const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
+  const [progressModal, setProgressModal] = useState<{ 
+    isOpen: boolean; 
+    flowName: string; 
+    requestId: string | null;
+  }>({
     isOpen: false,
     flowName: '',
     requestId: null
@@ -27,34 +45,55 @@ const FlowManager = () => {
   const { runningFlows, executeFlow } = useFlowExecutor({ addLog });
   const { subscribeToFlow, getFlowProgress, clearFlowProgress } = useWebhookUpdates();
 
+  const addDebugLog = (
+    level: DebugLog['level'], 
+    category: DebugLog['category'], 
+    message: string, 
+    details?: any
+  ) => {
+    const newLog: DebugLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      timestamp: new Date().toLocaleTimeString(),
+      level,
+      category,
+      message,
+      details
+    };
+    
+    setDebugLogs(prev => [newLog, ...prev.slice(0, 99)]);
+  };
+
+  const clearDebugLogs = () => {
+    setDebugLogs([]);
+  };
+
   const handleCreateFlow = async (flowData: any) => {
     try {
+      addDebugLog('info', 'ui', `Creating new flow: ${flowData.flowName}`);
       await createFlow(flowData);
-      setActiveTab('flows'); // Switch to flows tab after successful creation
+      setActiveTab('flows');
+      addDebugLog('success', 'ui', `Flow "${flowData.flowName}" created successfully`);
       toast({
         title: "Flow Created",
         description: `"${flowData.flowName}" has been successfully created.`,
       });
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to create flow';
+      addDebugLog('error', 'ui', `Failed to create flow: ${errorMsg}`, { error });
       console.error('Failed to create flow:', error);
       toast({
         title: "Error Creating Flow",
-        description: error instanceof Error ? error.message : 'Failed to create flow',
+        description: errorMsg,
         variant: "destructive",
       });
     }
   };
 
   const handleExecuteFlow = async (flowId: string) => {
-    console.log('[FLOW MANAGER] 🎯 Flow execution requested with webhook integration:', {
-      flowId,
-      userId: user?.id,
-      isGoogleConnected,
-      userFlowsCount: userFlows?.length || 0
-    });
+    addDebugLog('info', 'ui', `Flow execution requested for flow: ${flowId}`);
 
     if (!user || !isGoogleConnected) {
-      console.error('[FLOW MANAGER] ❌ Authentication check failed:', {
+      addDebugLog('error', 'auth', 'Authentication check failed', {
         hasUser: !!user,
         isGoogleConnected,
         userId: user?.id
@@ -70,11 +109,7 @@ const FlowManager = () => {
 
     const flow = userFlows?.find(f => f.id === flowId);
     if (!flow) {
-      console.error('[FLOW MANAGER] ❌ Flow not found:', {
-        requestedFlowId: flowId,
-        availableFlows: userFlows?.map(f => ({ id: f.id, name: f.flow_name })) || []
-      });
-      
+      addDebugLog('error', 'ui', `Flow not found: ${flowId}`);
       toast({
         title: "Flow Not Found",
         description: "The selected flow could not be found.",
@@ -98,8 +133,9 @@ const FlowManager = () => {
       google_refresh_token: flow.google_refresh_token
     };
 
-    // Show progress modal and subscribe to webhook updates
     const requestId = `flow-${flowId}-${Date.now()}`;
+    addDebugLog('info', 'webhook', `Starting flow execution with request ID: ${requestId}`);
+    
     setProgressModal({
       isOpen: true,
       flowName: flow.flow_name,
@@ -114,25 +150,14 @@ const FlowManager = () => {
     });
 
     try {
-      console.log('[FLOW MANAGER] 🚀 Starting flow execution with webhook integration...');
+      addDebugLog('info', 'apps_script', `Executing flow: ${flow.flow_name}`);
       const result = await executeFlow(userFlow);
-      
-      console.log('[FLOW MANAGER] 📥 Flow execution completed with webhook integration:', {
-        success: result?.success,
-        hasData: !!result?.data,
-        hasError: !!result?.error,
-        webhookEnabled: true
-      });
       
       if (result?.success) {
         const attachments = result.data?.attachments || 0;
         const emails = result.data?.processedEmails || 0;
         
-        console.log('[FLOW MANAGER] ✅ Flow execution successful:', {
-          flowName: flow.flow_name,
-          attachments,
-          emails
-        });
+        addDebugLog('success', 'apps_script', `Flow completed successfully: ${attachments} attachments from ${emails} emails`, result.data);
         
         toast({
           title: "Flow Completed",
@@ -140,11 +165,7 @@ const FlowManager = () => {
         });
       } else {
         const errorMsg = result?.error || 'Flow execution failed';
-        console.error('[FLOW MANAGER] ❌ Flow execution failed:', {
-          flowName: flow.flow_name,
-          error: errorMsg,
-          fullResult: result
-        });
+        addDebugLog('error', 'apps_script', `Flow execution failed: ${errorMsg}`, result);
         
         toast({
           title: "Flow Failed",
@@ -153,20 +174,16 @@ const FlowManager = () => {
         });
       }
     } catch (error) {
-      console.error('[FLOW MANAGER] 💥 Flow execution exception with webhook integration:', {
-        flowName: flow.flow_name,
-        error: error instanceof Error ? error.message : String(error),
-        webhookEnabled: true
-      });
+      const errorMsg = error instanceof Error ? error.message : 'An unexpected error occurred';
+      addDebugLog('error', 'network', `Flow execution exception: ${errorMsg}`, { error });
       
       toast({
         title: "Flow Error",
-        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        description: errorMsg,
         variant: "destructive",
       });
     } finally {
       unsubscribe();
-      // Keep modal open for a bit to show final results
       setTimeout(() => {
         setProgressModal(prev => ({ ...prev, isOpen: false }));
         if (requestId) {
@@ -178,18 +195,31 @@ const FlowManager = () => {
 
   const handleDeleteFlow = async (flowId: string) => {
     try {
+      addDebugLog('info', 'ui', `Deleting flow: ${flowId}`);
       await deleteFlow(flowId);
+      addDebugLog('success', 'ui', `Flow deleted successfully: ${flowId}`);
       toast({
         title: "Flow Deleted",
         description: "The flow has been successfully deleted.",
       });
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to delete flow';
+      addDebugLog('error', 'ui', `Failed to delete flow: ${errorMsg}`, { error });
       console.error('Failed to delete flow:', error);
       toast({
         title: "Error Deleting Flow",
-        description: error instanceof Error ? error.message : 'Failed to delete flow',
+        description: errorMsg,
         variant: "destructive",
       });
+    }
+  };
+
+  const handleRetryFlow = () => {
+    if (progressModal.requestId) {
+      const flowId = progressModal.requestId.split('-')[1];
+      if (flowId) {
+        handleExecuteFlow(flowId);
+      }
     }
   };
 
@@ -202,9 +232,24 @@ const FlowManager = () => {
 
   const currentProgress = progressModal.requestId ? getFlowProgress(progressModal.requestId) : null;
 
+  const connectionStatus = {
+    supabase: !!user,
+    appsScript: true, // Will be updated by health checks
+    webhook: true // Will be updated by health checks
+  };
+
+  const authStatus = {
+    isAuthenticated: !!user,
+    hasGoogleConnection: isGoogleConnected,
+    tokenValid: !!user && isGoogleConnected
+  };
+
   return (
     <div className="space-y-6">
       <AuthStatusAlert />
+
+      {/* Status Dashboard */}
+      <FlowStatusDashboard onShowDebug={() => setIsDebugPanelOpen(true)} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-2 bg-white shadow-sm border">
@@ -240,12 +285,24 @@ const FlowManager = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Real-time Progress Modal */}
+      {/* Enhanced Progress Modal */}
       <FlowProgressModal
         isOpen={progressModal.isOpen}
         onClose={handleCloseProgressModal}
         flowName={progressModal.flowName}
         progress={currentProgress}
+        onRetry={handleRetryFlow}
+        onShowDebug={() => setIsDebugPanelOpen(true)}
+      />
+
+      {/* Debug Panel */}
+      <FlowDebugPanel
+        isOpen={isDebugPanelOpen}
+        onClose={() => setIsDebugPanelOpen(false)}
+        logs={debugLogs}
+        onClearLogs={clearDebugLogs}
+        connectionStatus={connectionStatus}
+        authStatus={authStatus}
       />
     </div>
   );

@@ -2,8 +2,10 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, Clock, AlertCircle, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { CheckCircle, Clock, AlertCircle, Loader2, RefreshCw, Bug } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface FlowProgress {
   status: 'idle' | 'started' | 'processing' | 'completed' | 'error';
@@ -20,6 +22,7 @@ interface FlowProgress {
   };
   files?: any[];
   error?: string;
+  details?: any;
 }
 
 interface FlowProgressModalProps {
@@ -27,9 +30,18 @@ interface FlowProgressModalProps {
   onClose: () => void;
   flowName: string;
   progress: FlowProgress | null;
+  onRetry?: () => void;
+  onShowDebug?: () => void;
 }
 
-const FlowProgressModal = ({ isOpen, onClose, flowName, progress }: FlowProgressModalProps) => {
+const FlowProgressModal = ({ 
+  isOpen, 
+  onClose, 
+  flowName, 
+  progress, 
+  onRetry,
+  onShowDebug 
+}: FlowProgressModalProps) => {
   const getStatusIcon = () => {
     if (!progress) return <Clock className="h-5 w-5 text-gray-400" />;
     
@@ -62,6 +74,10 @@ const FlowProgressModal = ({ isOpen, onClose, flowName, progress }: FlowProgress
         return <Badge variant="secondary">Idle</Badge>;
     }
   };
+
+  const isError = progress?.status === 'error';
+  const isCompleted = progress?.status === 'completed';
+  const isProcessing = progress?.status === 'started' || progress?.status === 'processing';
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -96,8 +112,29 @@ const FlowProgressModal = ({ isOpen, onClose, flowName, progress }: FlowProgress
             </div>
           )}
 
+          {/* Error Alert */}
+          {isError && progress?.error && (
+            <Alert className="border-red-200 bg-red-50">
+              <AlertCircle className="h-4 w-4 text-red-600" />
+              <AlertDescription className="text-red-700">
+                <div className="space-y-2">
+                  <p className="font-medium">Execution Failed</p>
+                  <p className="text-sm">{progress.error}</p>
+                  {progress.details && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer font-medium">Technical Details</summary>
+                      <pre className="mt-2 bg-red-100 p-2 rounded text-xs overflow-auto">
+                        {JSON.stringify(progress.details, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Results Summary */}
-          {progress?.results && (
+          {progress?.results && isCompleted && (
             <div className="space-y-2">
               <h4 className="text-sm font-medium text-gray-700">Results</h4>
               <div className="grid grid-cols-2 gap-4 text-sm">
@@ -132,15 +169,28 @@ const FlowProgressModal = ({ isOpen, onClose, flowName, progress }: FlowProgress
             </div>
           )}
 
-          {/* Error */}
-          {progress?.error && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-red-700">Error Details</h4>
-              <p className="text-sm text-red-600 bg-red-50 p-3 rounded">
-                {progress.error}
-              </p>
+          {/* Action Buttons */}
+          <div className="flex justify-between pt-4">
+            <div className="flex gap-2">
+              {onShowDebug && (
+                <Button onClick={onShowDebug} variant="outline" size="sm">
+                  <Bug className="h-4 w-4 mr-1" />
+                  Debug
+                </Button>
+              )}
             </div>
-          )}
+            <div className="flex gap-2">
+              {isError && onRetry && (
+                <Button onClick={onRetry} variant="outline" size="sm">
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Retry
+                </Button>
+              )}
+              <Button onClick={onClose} variant={isError ? "default" : "outline"} size="sm">
+                {isProcessing ? 'Background' : 'Close'}
+              </Button>
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
