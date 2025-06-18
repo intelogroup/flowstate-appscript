@@ -86,34 +86,35 @@ serve(async (req) => {
       timestamp: new Date().toISOString()
     });
 
-    // Get environment variables with validation - UPDATED SECRET NAME
+    // Get environment variables with validation - V.06 COMPATIBLE
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
-    const scriptSecret = Deno.env.get('SCRIPT_SECRET')  // Changed from APPS_SCRIPT_SECRET
+    const scriptSecret = Deno.env.get('SCRIPT_SECRET')  // Using SCRIPT_SECRET to match V.06 Apps Script
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-    console.log('[EDGE FUNCTION] 🔧 Environment variables check for two-layer format:', {
+    console.log('[EDGE FUNCTION] 🔧 Environment variables check for V.06 compatibility:', {
       hasAppsScriptUrl: !!appsScriptUrl,
-      hasScriptSecret: !!scriptSecret,  // Updated variable name
+      hasScriptSecret: !!scriptSecret,  // V.06 compatible
       hasSupabaseUrl: !!supabaseUrl,
       hasSupabaseServiceKey: !!supabaseServiceKey,
       appsScriptUrlLength: appsScriptUrl?.length || 0,
-      secretLength: scriptSecret?.length || 0,  // Updated variable name
-      note: 'Script secret will be used in two-layer payload',
+      secretLength: scriptSecret?.length || 0,
+      note: 'SCRIPT_SECRET matches V.06 Apps Script property name',
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
 
-    // Enhanced environment validation - UPDATED SECRET NAME
+    // Enhanced environment validation - V.06 COMPATIBLE
     if (!appsScriptUrl || !scriptSecret) {
       logNetworkEvent('CONFIG_ERROR', {
         hasUrl: !!appsScriptUrl,
-        hasSecret: !!scriptSecret,  // Updated variable name
+        hasSecret: !!scriptSecret,
         request_id: debugInfo.request_id
       });
       return createCorsResponse({
         error: 'Configuration error: Missing Apps Script configuration',
-        details: `Missing ${!appsScriptUrl ? 'APPS_SCRIPT_URL' : ''} ${!scriptSecret ? 'SCRIPT_SECRET' : ''}`.trim(),  // Updated secret name
+        details: `Missing ${!appsScriptUrl ? 'APPS_SCRIPT_URL' : ''} ${!scriptSecret ? 'SCRIPT_SECRET' : ''}`.trim(),
+        note: 'SCRIPT_SECRET environment variable must match V.06 Apps Script SCRIPT_SECRET property',
         request_id: debugInfo.request_id
       }, 500);
     }
@@ -158,13 +159,13 @@ serve(async (req) => {
 
       originalPayload = JSON.parse(bodyText);
       
-      console.log('[EDGE FUNCTION] 📋 Parsed request payload for two-layer format:', {
+      console.log('[EDGE FUNCTION] 📋 Parsed request payload for V.06 compatibility:', {
         parsedPayload: JSON.stringify(originalPayload, null, 2),
         hasAction: !!originalPayload.action,
         action: originalPayload.action,
         hasUserId: !!originalPayload.user_id,
         hasUserConfig: !!originalPayload.userConfig,
-        willBecomePayloadLayer: 'This will become the inner payload in two-layer structure',
+        willBecomePayloadLayer: 'This will become the inner payload in two-layer structure for V.06',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -211,11 +212,11 @@ serve(async (req) => {
     // Get user email from Supabase profiles table
     let userEmail = null;
     if (originalPayload.user_id) {
-      console.log('[EDGE FUNCTION] 📧 Fetching user email for two-layer format:', {
+      console.log('[EDGE FUNCTION] 📧 Fetching user email for V.06 two-layer format:', {
         user_id: originalPayload.user_id,
         hasAuthHeader: !!authHeader,
         supabaseAuth: 'Using service role key for profile lookup',
-        note: 'User email will be included in two-layer payload',
+        note: 'User email will be included in V.06 two-layer payload',
         request_id: debugInfo.request_id,
         timestamp: new Date().toISOString()
       });
@@ -246,7 +247,7 @@ serve(async (req) => {
         }, 400);
       }
 
-      console.log('[EDGE FUNCTION] ✅ User email retrieved for two-layer payload:', {
+      console.log('[EDGE FUNCTION] ✅ User email retrieved for V.06 payload:', {
         user_id: originalPayload.user_id,
         hasEmail: !!userEmail,
         authMethod: 'service-role-lookup',
@@ -256,20 +257,20 @@ serve(async (req) => {
       });
     }
 
-    // Create two-layer payload for Apps Script - UPDATED SECRET PARAMETER
-    console.log('[EDGE FUNCTION] 🔧 Building two-layer Apps Script payload...');
+    // Create V.06 compatible two-layer payload for Apps Script
+    console.log('[EDGE FUNCTION] 🔧 Building V.06 compatible two-layer Apps Script payload...');
     const twoLayerPayload = buildAppsScriptPayload(
       originalPayload,
       userEmail,
-      scriptSecret,  // Changed from appsScriptSecret
+      scriptSecret,  // SCRIPT_SECRET for V.06 compatibility
       debugInfo.request_id
     );
 
-    console.log('[EDGE FUNCTION] 🚀 Calling Apps Script with two-layer format:', {
+    console.log('[EDGE FUNCTION] 🚀 Calling V.06 Apps Script with two-layer format:', {
       userEmail: userEmail,
       flowName: twoLayerPayload.payload?.userConfig?.flowName,
       driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
-      authMethod: 'two-layer-secret-payload',
+      authMethod: 'V.06-compatible-two-layer-secret-payload',
       hasSecret: !!twoLayerPayload.secret,
       hasPayload: !!twoLayerPayload.payload,
       innerAction: twoLayerPayload.payload?.action,
@@ -281,11 +282,11 @@ serve(async (req) => {
       userEmail: userEmail,
       flowName: twoLayerPayload.payload?.userConfig?.flowName,
       driveFolder: twoLayerPayload.payload?.userConfig?.driveFolder,
-      format: 'two-layer-secret-payload',
+      format: 'V.06-compatible-two-layer-secret-payload',
       request_id: debugInfo.request_id
     });
 
-    // Call Apps Script with two-layer format
+    // Call Apps Script with V.06 compatible format
     try {
       const appsScriptData = await callAppsScript(
         appsScriptUrl,
@@ -295,11 +296,11 @@ serve(async (req) => {
 
       const totalDuration = Date.now() - startTime;
 
-      console.log('[EDGE FUNCTION] ✅ Apps Script call successful with two-layer format:', {
+      console.log('[EDGE FUNCTION] ✅ V.06 Apps Script call successful:', {
         status: appsScriptData.status,
         attachments: appsScriptData.data?.attachments || 0,
         total_duration: totalDuration,
-        authMethod: appsScriptData.data?.authMethod || 'unknown',
+        authMethod: appsScriptData.data?.authMethod || 'V.06-two-layer',
         version: appsScriptData.version,
         processingTime: appsScriptData.processing_time,
         request_id: debugInfo.request_id,
@@ -310,11 +311,11 @@ serve(async (req) => {
         status: appsScriptData.status,
         attachments: appsScriptData.data?.attachments || 0,
         total_duration: totalDuration,
-        format: 'two-layer-secret-payload',
+        format: 'V.06-compatible-two-layer-secret-payload',
         request_id: debugInfo.request_id
       });
 
-      // Process the response using the two-layer format response processor
+      // Process the response using the V.06 compatible response processor
       const processedResponse = processAppsScriptResponse(
         appsScriptData,
         userEmail,
@@ -322,7 +323,7 @@ serve(async (req) => {
         totalDuration
       );
 
-      console.log('[EDGE FUNCTION] 📤 Returning processed two-layer response:', {
+      console.log('[EDGE FUNCTION] 📤 Returning processed V.06 response:', {
         responseType: processedResponse.success ? 'success' : 'error',
         hasAppsScriptResponse: !!processedResponse.apps_script_response,
         authMethod: processedResponse.auth_method,
@@ -336,11 +337,11 @@ serve(async (req) => {
     } catch (appsScriptError) {
       const totalDuration = Date.now() - startTime;
       
-      console.error('[EDGE FUNCTION] ❌ Apps Script call failed with two-layer format:', {
+      console.error('[EDGE FUNCTION] ❌ V.06 Apps Script call failed:', {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        authMethod: 'two-layer-secret-payload',
+        authMethod: 'V.06-compatible-two-layer-secret-payload',
         sentPayloadStructure: {
           hasSecret: !!twoLayerPayload.secret,
           hasPayload: !!twoLayerPayload.payload,
@@ -353,11 +354,11 @@ serve(async (req) => {
         error: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
-        format: 'two-layer-secret-payload'
+        format: 'V.06-compatible-two-layer-secret-payload'
       });
       
       return createCorsResponse({
-        error: 'Apps Script execution failed',
+        error: 'V.06 Apps Script execution failed',
         details: appsScriptError.message,
         request_id: debugInfo.request_id,
         total_duration: totalDuration,
@@ -365,7 +366,7 @@ serve(async (req) => {
           user_id: originalPayload.user_id,
           user_email: userEmail,
           apps_script_url: appsScriptUrl,
-          auth_method: 'two-layer-secret-payload',
+          auth_method: 'V.06-compatible-two-layer-secret-payload',
           sent_payload_structure: {
             hasSecret: !!twoLayerPayload.secret,
             hasPayload: !!twoLayerPayload.payload
