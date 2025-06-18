@@ -9,6 +9,72 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      flow_execution_logs: {
+        Row: {
+          apps_script_duration_ms: number | null
+          apps_script_response: Json | null
+          attachments_processed: number | null
+          auth_method: string | null
+          completed_at: string | null
+          created_at: string
+          emails_found: number | null
+          emails_processed: number | null
+          error_message: string | null
+          expires_at: string
+          flow_id: string
+          flow_name: string
+          id: string
+          request_id: string | null
+          started_at: string
+          success: boolean
+          total_duration_ms: number | null
+          user_id: string
+          version: string | null
+        }
+        Insert: {
+          apps_script_duration_ms?: number | null
+          apps_script_response?: Json | null
+          attachments_processed?: number | null
+          auth_method?: string | null
+          completed_at?: string | null
+          created_at?: string
+          emails_found?: number | null
+          emails_processed?: number | null
+          error_message?: string | null
+          expires_at?: string
+          flow_id: string
+          flow_name: string
+          id?: string
+          request_id?: string | null
+          started_at?: string
+          success?: boolean
+          total_duration_ms?: number | null
+          user_id: string
+          version?: string | null
+        }
+        Update: {
+          apps_script_duration_ms?: number | null
+          apps_script_response?: Json | null
+          attachments_processed?: number | null
+          auth_method?: string | null
+          completed_at?: string | null
+          created_at?: string
+          emails_found?: number | null
+          emails_processed?: number | null
+          error_message?: string | null
+          expires_at?: string
+          flow_id?: string
+          flow_name?: string
+          id?: string
+          request_id?: string | null
+          started_at?: string
+          success?: boolean
+          total_duration_ms?: number | null
+          user_id?: string
+          version?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -122,7 +188,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      cleanup_expired_flow_logs: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never

@@ -1,5 +1,6 @@
 import { FlowConfig, FlowExecutionResult } from './types/flowTypes';
 import { supabase } from '@/integrations/supabase/client';
+import { FlowExecutionLogger } from './flowExecutionLogger';
 
 export interface DetailedError {
   type: 'authentication' | 'network' | 'apps_script' | 'timeout' | 'unknown';
@@ -18,13 +19,14 @@ export class FlowExecutionService {
     userConfig: FlowConfig
   ): Promise<FlowExecutionResult> {
     const startTime = Date.now();
+    const startedAt = new Date().toISOString();
     
     try {
-      console.log('[FLOW EXECUTION] 🚀 Starting flow execution with enhanced error tracking:', {
+      console.log('[FLOW EXECUTION] 🚀 Starting flow execution with enhanced error tracking and logging:', {
         flowId,
         userId: userConfig.userId,
         flowName: userConfig.flowName,
-        timestamp: new Date().toISOString()
+        timestamp: startedAt
       });
       
       this.validateConfig(userConfig);
@@ -42,6 +44,19 @@ export class FlowExecutionService {
           timestamp: new Date().toISOString()
         };
         console.error('[FLOW EXECUTION] ❌ Authentication error:', authError);
+        
+        // Log the failed execution
+        await FlowExecutionLogger.logExecution({
+          flowId,
+          userId: userConfig.userId,
+          flowName: userConfig.flowName,
+          startedAt,
+          success: false,
+          errorMessage: authError.message,
+          authMethod: 'supabase',
+          totalDurationMs: Date.now() - startTime
+        });
+        
         throw new Error(`Authentication required: ${authError.message}`);
       }
 
@@ -81,6 +96,19 @@ export class FlowExecutionService {
           timestamp: new Date().toISOString()
         };
         console.error('[FLOW EXECUTION] 💥 Network error:', networkError);
+        
+        // Log the failed execution
+        await FlowExecutionLogger.logExecution({
+          flowId,
+          userId: userConfig.userId,
+          flowName: userConfig.flowName,
+          startedAt,
+          success: false,
+          errorMessage: networkError.message,
+          authMethod: 'supabase',
+          totalDurationMs: Date.now() - startTime
+        });
+        
         throw new Error(networkError.message);
       }
 
@@ -99,6 +127,18 @@ export class FlowExecutionService {
         } catch (textError) {
           errorText = `HTTP ${response.status}: ${response.statusText}`;
         }
+        
+        // Log the failed execution
+        await FlowExecutionLogger.logExecution({
+          flowId,
+          userId: userConfig.userId,
+          flowName: userConfig.flowName,
+          startedAt,
+          success: false,
+          errorMessage: errorText,
+          authMethod: 'supabase',
+          totalDurationMs: Date.now() - startTime
+        });
         
         throw new Error(errorText);
       }
@@ -121,10 +161,45 @@ export class FlowExecutionService {
           timestamp: new Date().toISOString()
         };
         console.error('[FLOW EXECUTION] ❌ JSON parse error:', jsonError);
+        
+        // Log the failed execution
+        await FlowExecutionLogger.logExecution({
+          flowId,
+          userId: userConfig.userId,
+          flowName: userConfig.flowName,
+          startedAt,
+          success: false,
+          errorMessage: jsonError.message,
+          authMethod: 'supabase',
+          totalDurationMs: Date.now() - startTime
+        });
+        
         throw new Error(jsonError.message);
       }
 
-      return this.processResult(result);
+      const processedResult = this.processResult(result);
+      
+      // Log the execution (success or failure)
+      const totalDuration = Date.now() - startTime;
+      await FlowExecutionLogger.logExecution({
+        flowId,
+        userId: userConfig.userId,
+        flowName: userConfig.flowName,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        success: processedResult.success,
+        attachmentsProcessed: processedResult.data?.attachments,
+        emailsFound: processedResult.data?.emailsFound,
+        emailsProcessed: processedResult.data?.processedEmails,
+        totalDurationMs: totalDuration,
+        appsScriptDurationMs: processedResult.data?.performance_metrics?.total_duration,
+        errorMessage: processedResult.error,
+        requestId: payload.debug_info?.request_id,
+        authMethod: 'supabase',
+        appsScriptResponse: result
+      });
+      
+      return processedResult;
 
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -136,6 +211,19 @@ export class FlowExecutionService {
         userId: userConfig.userId,
         duration: `${duration}ms`,
         timestamp: new Date().toISOString()
+      });
+      
+      // Log the failed execution if not already logged
+      await FlowExecutionLogger.logExecution({
+        flowId,
+        userId: userConfig.userId,
+        flowName: userConfig.flowName,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        success: false,
+        errorMessage: errorMsg,
+        totalDurationMs: duration,
+        authMethod: 'supabase'
       });
       
       return {
