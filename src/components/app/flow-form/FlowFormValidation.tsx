@@ -15,5 +15,5 @@ export const validateFlowForm = (flowData: FlowFormData): FlowFormValidationResu
 };
 
 export const isFormValid = (flowData: FlowFormData): boolean => {
-  return flowData.flowName.trim() && flowData.senders.trim() && flowData.driveFolder.trim();
+  return !!(flowData.flowName.trim() && flowData.senders.trim() && flowData.driveFolder.trim());
 };
