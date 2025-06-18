@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { corsHeaders, createCorsResponse, handleCorsPrelight } from "../_shared/cors.ts"
 import { extractDebugInfo, logNetworkEvent } from "../_shared/network-utils.ts"
@@ -85,34 +86,34 @@ serve(async (req) => {
       timestamp: new Date().toISOString()
     });
 
-    // Get environment variables with validation
+    // Get environment variables with validation - UPDATED SECRET NAME
     const appsScriptUrl = Deno.env.get('APPS_SCRIPT_URL')
-    const appsScriptSecret = Deno.env.get('APPS_SCRIPT_SECRET')
+    const scriptSecret = Deno.env.get('SCRIPT_SECRET')  // Changed from APPS_SCRIPT_SECRET
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
     console.log('[EDGE FUNCTION] 🔧 Environment variables check for two-layer format:', {
       hasAppsScriptUrl: !!appsScriptUrl,
-      hasAppsScriptSecret: !!appsScriptSecret,
+      hasScriptSecret: !!scriptSecret,  // Updated variable name
       hasSupabaseUrl: !!supabaseUrl,
       hasSupabaseServiceKey: !!supabaseServiceKey,
       appsScriptUrlLength: appsScriptUrl?.length || 0,
-      secretLength: appsScriptSecret?.length || 0,
-      note: 'Apps Script secret will be used in two-layer payload',
+      secretLength: scriptSecret?.length || 0,  // Updated variable name
+      note: 'Script secret will be used in two-layer payload',
       request_id: debugInfo.request_id,
       timestamp: new Date().toISOString()
     });
 
-    // Enhanced environment validation
-    if (!appsScriptUrl || !appsScriptSecret) {
+    // Enhanced environment validation - UPDATED SECRET NAME
+    if (!appsScriptUrl || !scriptSecret) {
       logNetworkEvent('CONFIG_ERROR', {
         hasUrl: !!appsScriptUrl,
-        hasSecret: !!appsScriptSecret,
+        hasSecret: !!scriptSecret,  // Updated variable name
         request_id: debugInfo.request_id
       });
       return createCorsResponse({
         error: 'Configuration error: Missing Apps Script configuration',
-        details: `Missing ${!appsScriptUrl ? 'APPS_SCRIPT_URL' : ''} ${!appsScriptSecret ? 'APPS_SCRIPT_SECRET' : ''}`.trim(),
+        details: `Missing ${!appsScriptUrl ? 'APPS_SCRIPT_URL' : ''} ${!scriptSecret ? 'SCRIPT_SECRET' : ''}`.trim(),  // Updated secret name
         request_id: debugInfo.request_id
       }, 500);
     }
@@ -255,12 +256,12 @@ serve(async (req) => {
       });
     }
 
-    // Create two-layer payload for Apps Script
+    // Create two-layer payload for Apps Script - UPDATED SECRET PARAMETER
     console.log('[EDGE FUNCTION] 🔧 Building two-layer Apps Script payload...');
     const twoLayerPayload = buildAppsScriptPayload(
       originalPayload,
       userEmail,
-      appsScriptSecret,
+      scriptSecret,  // Changed from appsScriptSecret
       debugInfo.request_id
     );
 

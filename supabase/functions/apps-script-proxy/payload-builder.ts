@@ -1,16 +1,15 @@
-
 import { RequestBody, AppsScriptPayload } from "./types.ts"
 
 export function buildAppsScriptPayload(
   originalPayload: RequestBody,
   userEmail: string | null,
-  appsScriptSecret: string,
+  scriptSecret: string,  // Changed parameter name from appsScriptSecret
   requestId: string
 ): any { // Changed return type to support two-layer structure
   console.log('[PAYLOAD BUILDER] 🔧 Starting two-layer payload transformation:', {
     originalPayload: JSON.stringify(originalPayload, null, 2),
     userEmail,
-    hasSecret: !!appsScriptSecret,
+    hasSecret: !!scriptSecret,  // Updated variable name
     requestId,
     targetFormat: 'two-layer-secret-payload',
     timestamp: new Date().toISOString()
@@ -70,7 +69,7 @@ export function buildAppsScriptPayload(
 
   // Create the two-layer structure (secret + payload)
   const twoLayerPayload = {
-    secret: appsScriptSecret,
+    secret: scriptSecret,  // Updated variable name
     payload: innerPayload
   };
 
