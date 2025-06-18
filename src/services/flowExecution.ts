@@ -228,8 +228,7 @@ export class FlowExecutionService {
         data: {
           ...successData,
           performance_metrics: result.performance_metrics,
-          debugInfo: appsScriptData.data?.debugInfo || result.debug_info,
-          webhookEnabled: true
+          debugInfo: appsScriptData.data?.debugInfo || result.debug_info
         }
       };
     } else if (appsScriptData.status === 'error') {
